@@ -26,7 +26,7 @@ The local API is foundational to the initial headless daemon and CLI. Authentica
 
 Rust is the implementation language. Slint is the preferred GUI framework, pending compatibility testing. SiliconWatch draws inspiration in part from HWiNFO64 and is independently developed for Linux.
 
-Detailed architecture, roadmap, security guidance, and design rationale will live in separate documents under `docs/`, with contributor guidance in `CONTRIBUTING.md` as development takes shape.
+The [design decisions](docs/DESIGN_DECISIONS.md) capture accepted project direction and pending questions. Detailed architecture, roadmap, and security guidance will follow under `docs/`, with contributor guidance in `CONTRIBUTING.md` as development takes shape.
 
 ## Help shape SiliconWatch
 

@@ -1,0 +1,325 @@
+# SiliconWatch Design Decisions
+
+> **Status:** Design record, pre-alpha. Decisions 1–42 are accepted project direction, not claims of implemented functionality. Decision 43 is pending. This document is a planning reference, not a release or security certification.
+
+SiliconWatch is an independent Rust-based Linux hardware monitoring project inspired by the depth of HWiNFO64. The initial engineering target is an efficient headless daemon, CLI, and local API. A native GUI follows as an API client.
+
+**Project baseline:** Linux-first, initially x86-64, with a versioned local API foundational to the headless daemon and CLI. The GUI is an optional API client. Licensing is [GNU GPLv3](../LICENSE); contribution signoffs follow Decision 41.
+
+## Decision conventions
+
+- Decision numbers are stable identifiers grouped by topic, not delivery order.
+- **Accepted** means the product behavior has been agreed upon, not that it has been implemented or validated.
+- **Pending** decisions must not be treated as implementation requirements until approved.
+- Changes to accepted decisions require an explicit new entry in the revision log and an update to the affected entry; do not silently reinterpret them.
+- Protective actions remain **disabled until explicitly authorized**. Notification severity, imported profiles, simulations, and escalation do not confer authorization.
+- Monitoring access, configuration authority, and authorization for disruptive actions are distinct. The specific local permissions policy remains pending under Decision 43; no option has been approved.
+- Implementation details not settled here should be recorded as proposals rather than attributed to these decisions.
+
+## Service, interfaces, and distribution
+
+### 1. Start at boot — Accepted
+
+Install the system-wide monitoring daemon to start at boot by default, with prominent disclosure and an opt-out. Boot-time monitoring must not silently activate protective shutdowns.
+
+**Why:** Server and unattended desktop alarms need coverage without a GUI session.
+
+### 5. Local-first, remote-ready interfaces — Accepted
+
+Implement the local API first, using D-Bus as the initial direction, while keeping interfaces suitable for future authenticated remote access.
+
+**Why:** Headless CLI and future GUI should reuse the same sensor cache and command contracts.
+
+### 6. Pull and push remote telemetry — Accepted
+
+Support both models eventually. Implement authenticated pull first; central collection remains optional, and local alarms must continue independently.
+
+**Why:** Both workstation inspection and a small centralized Proxmox collector should be possible.
+
+### 7. Remote authentication — Accepted
+
+Use mTLS for machine-to-machine connections and scoped API tokens for third-party integrations. Remote exposure is opt-in. Remote API authorization never implies permission to shut down a host.
+
+**Why:** Hardware inventory and telemetry should not be broadly exposed on a network.
+
+### 14. Packaging — Accepted
+
+Develop with Cargo. Plan separate packages for the headless daemon/CLI and optional GUI, with native Debian and Arch packaging plus standalone binaries.
+
+**Why:** Proxmox nodes should not need a desktop stack installed.
+
+### 20. Distribution support tiers — Accepted
+
+Primary: Debian/Proxmox and Arch/CachyOS. Secondary: Ubuntu LTS and Fedora. Other distributions receive best-effort support.
+
+**Why:** Prioritize systems available for repeatable testing.
+
+### 21. Architecture support — Accepted
+
+Develop and validate x86-64 first. Keep the core portable so ARM64 builds and architecture-specific providers can follow.
+
+**Why:** Avoid architecture assumptions in shared code without delaying the first release.
+
+### 22. Updates — Accepted
+
+The operating system package manager controls updates. SiliconWatch does not self-update or reboot automatically. It may optionally notify about releases and must back up configuration before migrations.
+
+**Why:** Preserve operator control and recoverability, especially on servers.
+
+### 24. API lifecycle — Accepted
+
+Version interfaces and publish schemas from the outset. Support capability negotiation. Mark pre-1.0 APIs experimental and maintain backward compatibility after stabilization.
+
+**Why:** Future GUI clients and third-party integrations need explicit compatibility expectations.
+
+### 26. Shared service and user preferences — Accepted
+
+Run one system-wide daemon with shared telemetry and administrative alarm policy. Keep layouts, dashboards, and UI preferences separate by user.
+
+**Why:** Avoid duplicate hardware polling while supporting multi-user systems.
+
+### 30. First-run experience — Accepted
+
+Discover and show sensors automatically with safe defaults. Offer an optional GUI setup wizard and equivalent headless CLI configuration. No disruptive actions are enabled automatically.
+
+**Why:** Work out of the box on desktops and servers without privileging one interface.
+
+## Sensors, calculation, and data quality
+
+### 2. Sensor discovery and confidence — Accepted
+
+Display all discovered sensors, flag questionable readings, and require validation before any questionable source can drive disruptive protection.
+
+**Why:** Linux hardware interfaces sometimes expose mislabeled, disconnected, or implausible readings.
+
+### 4. Adaptive per-sensor polling — Accepted
+
+Use configurable adaptive intervals, central caching, overhead monitoring, and protection-aware minimum sampling rates.
+
+**Why:** Preserve gaming frame times without slowing safety-related observations excessively.
+
+### 8. Provider architecture — Accepted
+
+Use built-in Rust providers for common hardware, with an optional versioned plugin boundary for specialized hardware.
+
+**Why:** Deliver reliable baseline support while allowing hardware-specific extensions.
+
+### 10. Persistent sensor identity — Accepted
+
+Assign persistent hardware-backed identities, with rediscovery, aliases, and explicit ambiguity detection. Never silently attach an alarm to a different sensor following hardware changes.
+
+**Why:** Sensor index order and display names are not durable identifiers.
+
+### 12. Virtual sensor formulas — Accepted
+
+Provide a safe, unit-aware formula engine for arithmetic, conditionals, moving averages, rates of change, and chained calculated sensors.
+
+**Why:** Cooling-loop analysis needs derived values such as average radiator intake/exhaust temperatures and deltas.
+
+### 19. Hardware control boundary — Accepted
+
+Keep the core a read-only telemetry collector for physical and calculated sensors. Expose data to optional third-party fan/pump controllers via API; do not implement direct hardware fan or pump control in the core. Separately authorized protective shutdowns remain an explicit exception to read-only operation.
+
+**Why:** Separate monitoring from continuous actuator control and its failure modes.
+
+### 33. Suspend/resume handling — Accepted
+
+Invalidate stale samples on resume, refresh affected providers, use fresh validated samples in alarm evaluation, and surface missing sensors explicitly. Do not blindly disable thermal protection because a source temporarily disappears.
+
+**Why:** Resuming from sleep can invalidate sensor handles and time assumptions.
+
+### 35. Canonical and alternative readings — Accepted
+
+Prefer a canonical reading while retaining expandable alternative provider values and raw source data. Deduplicate only when identity and measurement semantics justify it. Allow explicit provider selection.
+
+**Why:** Similar labels do not necessarily mean two sensors measure the same physical quantity.
+
+### 36. Sensor calibration — Accepted
+
+Support offsets, scaling, and optional multipoint calibration. Preserve raw readings, label calibrated values, and require separate validation before calibrated data can drive disruptive protection.
+
+**Why:** External temperature probes and flow meters may need correction without losing original evidence.
+
+### 37. Statistics scope — Accepted
+
+Support session, rolling-window, and historical sensor statistics. Users choose the period and can explicitly reset session statistics without deleting historical records.
+
+**Why:** A peak since boot answers a different question from a peak during a gaming session.
+
+## History, configuration, and portability
+
+### 3. Historical data model — Accepted
+
+Default to 15 minutes of detailed in-memory samples, seven days of downsampled disk history, and detailed alarm snapshots. Make retention configurable.
+
+**Why:** Retain useful incident context without excessive continuous disk writes.
+
+### 9. Configuration and persistence — Accepted
+
+Use human-readable TOML for settings, formulas, and alarm rules; SQLite for history and events. GUI and CLI changes pass through daemon validation rather than directly editing live service state.
+
+**Why:** Make configuration auditable, portable, and consistently validated.
+
+### 17. Portable diagnostic reports — Accepted
+
+Generate reports locally, redact sensitive identifiers by default, and require explicit opt-in for extra details. Never automatically upload reports.
+
+**Why:** Troubleshooting bundles should be shareable without unintentionally exposing host identity or network details.
+
+### 29. Reusable profiles — Accepted
+
+Allow profiles and templates to be exported and imported. Require sensor mapping and validation on the destination machine. Never import shutdown permission automatically.
+
+**Why:** Configurations should be reusable across heterogeneous hardware without unsafe identity assumptions.
+
+### 31. Network-outage durability — Accepted
+
+Continue local telemetry and alarm recording during outages, and synchronize missing history/events after reconnection within configurable storage, bandwidth, and retention limits.
+
+**Why:** Network interruptions must not erase incident evidence or interrupt local monitoring.
+
+### 38. Retention under storage pressure — Accepted
+
+Enforce configurable age and disk budgets. Prioritize critical events and audit records, downsample or remove routine samples first, and never let persistence pressure block acquisition or alarm evaluation.
+
+**Why:** A full disk must not stall the active protection engine.
+
+## Alarms, safety, and notifications
+
+### 11. Notification channels — Accepted
+
+Support local notifications and persistent logs, plus optional per-rule webhook, email, ntfy, and Gotify providers.
+
+**Why:** Desktop users and unattended hosts need different delivery paths.
+
+### 13. First-run alarm templates — Accepted
+
+Offer hardware-aware, notification-only templates. Users choose which to activate. No shutdown authorization is granted by setup.
+
+**Why:** Useful initial warnings should not cause surprise shutdowns.
+
+### 15. Least-privilege execution — Accepted
+
+Run the daemon and GUI unprivileged by default. Introduce narrow privileged helpers only for necessary operations and separate authorization for disruptive actions.
+
+**Why:** Reading telemetry should not require unrestricted root execution.
+
+### 16. Post-shutdown recovery notices — Accepted
+
+After a protective shutdown, show a persistent unacknowledged warning explaining the trigger, history, and current sensor state. Do not restrict subsequent system operation.
+
+**Why:** Users returning to an unexpectedly powered-off machine need the cause and supporting evidence.
+
+### 25. Daemon supervision — Accepted
+
+Use systemd restart/watchdog supervision, persistent service-failure events, health reporting, and optional remote alerts. Daemon failure itself must not initiate shutdown.
+
+**Why:** Monitoring failures require visibility, not an automatic destructive response.
+
+### 27. Notification escalation — Accepted
+
+Support optional per-rule escalation with configurable delays, additional channels, rate limits, and acknowledgment handling. Escalation never grants shutdown authority.
+
+**Why:** A missed alert can be routed more aggressively without broadening its permissions.
+
+### 32. Maintenance mode — Accepted
+
+Provide time-limited maintenance with independent notification suppression and protective-action controls. Keep recording/auditing, preserve protection by default, and automatically restore normal operation.
+
+**Why:** Maintenance should reduce alert noise without silently removing safeguards.
+
+### 34. Unreviewed alarms — Accepted
+
+On login or GUI reopening, group significant unreviewed alarms, including resolved and still-active conditions. Preserve acknowledgment state and avoid notification storms.
+
+**Why:** Users need an intelligible incident summary after being away.
+
+### 42. Protection-rule simulation — Accepted
+
+Support injected simulated readings, historical replay, and dry-run evaluation. Simulations may produce simulated alarm outcomes but **must never call the real shutdown mechanism**. Enabling an actual disruptive action remains separately authorized.
+
+**Why:** Test thresholds, timing, noise, and dropout behavior without endangering a running system. Simulation does not validate the physical sensor itself.
+
+## User experience, performance, and release governance
+
+### 18. GUI presentation — Accepted
+
+Offer a dense HWiNFO-style grouped sensor table as the default GUI view, along with customizable dashboards.
+
+**Why:** Power users need comprehensive detail, while dashboards highlight selected relationships.
+
+### 23. Performance gates — Accepted
+
+Run lightweight CI benchmarks on pull requests and comprehensive release benchmarks. Document CPU, memory, polling, and gaming frame-time budgets.
+
+**Why:** Low overhead is a primary product requirement, not a late optimization.
+
+### 28. Accessibility — Accepted
+
+Design GUI workflows for keyboard navigation, screen readers, scalable controls, configurable shortcuts, and one-handed use. Consider optional voice integrations later.
+
+**Why:** Accessibility should influence architecture and interactions before GUI implementation.
+
+### 39. Community plugins — Accepted
+
+Allow verified official plugins and explicitly approved community plugins. Require versioned manifests and permission declarations, process isolation, and no implicit privileged access.
+
+**Why:** Extensions increase hardware reach but also introduce supply-chain and process-safety concerns.
+
+### 40. Release stages — Accepted
+
+Stage delivery as experimental headless alpha, native GUI beta, expanded monitoring and alarms, and stable 1.0 only after protection features have been validated and APIs stabilized.
+
+**Why:** Avoid representing pre-alpha monitoring or unvalidated protection as production-ready.
+
+### 41. Contributor provenance — Accepted
+
+Require Developer Certificate of Origin (DCO) commit signoffs, checked in contributions. Contributors retain their copyright; no CLA or copyright assignment.
+
+**Why:** Provide a lightweight statement of contribution rights and respect for proprietary third-party work.
+
+## Pending decisions
+
+### 43. Local API permissions — Pending
+
+Determine local read access, administrator configuration rights, and independent authorization for disruptive actions across D-Bus, CLI, GUI, and shared systems. No option is accepted yet.
+
+**Existing constraints:** Decisions 7, 15, and 26 already require remote authentication, least-privilege operation, and a shared system-wide daemon. Do not infer the final local policy from those constraints alone.
+
+## Cross-cutting implementation invariants
+
+1. **Acquisition is shared:** Providers feed one daemon-owned sensor cache; CLI, GUI, history, formulas, alarms, and remote clients consume validated data rather than independently polling hardware.
+2. **Trust is explicit:** Raw, calibrated, derived, stale, missing, and questionable readings remain distinguishable. Identity ambiguity cannot silently retarget protection.
+3. **Effects are gated:** Notification, escalation, profile import, simulated tests, and access to telemetry never imply shutdown authorization. Only a separately authorized real protection path may invoke a privileged helper.
+4. **Local operation is independent:** Loss of network, GUI, dashboard, or database write availability must not by itself stop local sensor collection or live alarm evaluation.
+5. **Performance is measurable:** Provider poll frequency, cache behavior, storage load, and client rendering must fit documented system overhead and frame-time budgets.
+6. **Experimental status is visible:** Planned capabilities, implemented capabilities, and validated protection behavior must be distinguished in docs and releases.
+
+## Integration review questions — not accepted decisions
+
+These questions identify wording tensions and implementation details left open by the supplied record. They do not amend Decisions 1–42, select a policy for Decision 43, or authorize protective actions.
+
+| Area | Related decisions | Clarification requested |
+| --- | --- | --- |
+| Meaning of validation | 2, 35, 36; invariant 1 | Does “validated data” mean structurally valid cache records that can still be flagged questionable, or only readings approved for protection? The latter interpretation conflicts with displaying questionable readings and preserving raw alternatives. |
+| Local permissions and source trust | 2, 7, 10, 15, 26, 35, 36, 43 | Who may monitor, configure, validate sensor mappings, and independently authorize disruptive actions? What changes to a provider, sensor identity, or calibration invalidate prior validation? The local permissions policy remains **PENDING**. |
+| Derived data, timing, and missing sensors | 4, 10, 12, 25, 33, 35, 36, 37 | How do stale, missing, questionable, or simulated inputs propagate through formulas and provider fallback? How do adaptive polling and suspend gaps affect moving averages, rate calculations, alarm timing, and statistics? What observable degraded state applies when protection lacks fresh evidence? |
+| Simulation and external effects | 11, 19, 39, 42; invariants 1–3 | How are replay and simulated samples isolated from live protection while preserving their provenance? May simulations emit real notifications, webhooks, or controller-facing events that could trigger external actions? The prohibition on calling the real shutdown mechanism remains unchanged. |
+| Persistence and recovery | 3, 16, 25, 31, 38; invariant 4 | How are incident evidence and service-failure events reported when storage is full or unavailable? What happens if an already authorized protective action cannot persist its explanation? How are retention gaps represented during historical replay or reconnect synchronization? |
+| Standalone updates | 14, 22 | What is the supported update and configuration-backup workflow for standalone binaries when updates are described as controlled by the operating system package manager? The accepted prohibition on self-updating and automatic rebooting remains unchanged. |
+| Performance and release gates | 4, 12, 23, 40 | What numeric CPU, memory, polling, and frame-time budgets, reference workloads, and protection-validation criteria define each release gate? What happens when minimum protection sampling rates exceed hardware capability or the overhead budget, and which features belong in the initial headless alpha? |
+| Diagnostic privacy | 7, 9, 17, 29 | Which identifiers, credentials, configuration fields, and log contents must default redaction cover, and how are optional extra details reviewed before opt-in? Local report generation and the prohibition on automatic upload remain unchanged. |
+
+## Revision history
+
+| Date | Change | Status |
+| --- | --- | --- |
+| 2026-11-16 | Initial consolidated record of decisions 1–42 from project discussions; decision 43 explicitly pending. | Draft for review |
+| 2026-11-16 | Integrated the supplied record into `docs/`; preserved all accepted decision text and pending Decision 43; added explicit project context, consistent heading spacing, and non-normative review questions. | Integration draft; awaiting review |
+
+## Next steps
+
+1. Review this consolidation against the agreed conversations. Correct any wording that overstates a decision.
+2. Decide question 43 and append the accepted choice with its rationale.
+3. Convert major sections into architecture and implementation specifications as engineering begins.
+4. Keep this record synchronized with later explicit decisions and their revision dates.
