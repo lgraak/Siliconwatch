@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-16
 
-**Status:** Complete — implemented and verified locally; awaiting Chris's review. Experimental read-only monitoring, without hard real-time or physical-freshness guarantees.
+**Status:** Complete — implementation reviewed, published in [PR #2](https://github.com/lgraak/Siliconwatch/pull/2), and verified by hosted CI; awaiting Chris's merge approval. Experimental read-only monitoring, without hard real-time or physical-freshness guarantees.
 
 ## 1. Milestone summary
 
@@ -201,22 +201,41 @@ The recorded category difference is **13 inputs: three temperatures, eight volta
 
 ### Publication checkpoint
 
-The reviewed commit will contain exactly README.md, src/lib.rs, src/main.rs, src/sampling.rs, src/sampling/tests.rs, tests/sampling_cli.rs, the preserved/annotated proposal, and this report. Application dependencies, original reader/identity/tests, CI, license, and artwork remain unchanged. No binaries, temporary hardware dumps, unrelated files, or apparent credentials belong to this set. Hosted results must be observed after publication; local passes do not imply CI success.
+The reviewed implementation commit contains exactly README.md, src/lib.rs, src/main.rs, src/sampling.rs, src/sampling/tests.rs, tests/sampling_cli.rs, the preserved/annotated proposal, and this report. Application dependencies, original reader/identity/tests, CI, license, and artwork remain unchanged. No binaries, temporary hardware dumps, unrelated files, or apparent credentials were found in this set. Whitespace and relative-link checks passed. The index matched the reviewed file hashes before committing.
 
-## Implementation handoff — historical
+## Verified publication results — 2026-11-16
 
-SiliconWatch Alpha 1, Prototype 003 is complete locally and ready for Chris's review. Chris authorized bounded foreground sampling on codex/alpha1-prototype003, preserving one-shot behavior and excluding services, persistence, APIs, GUI, adaptive polling, alarms, controls, and shutdowns. No Prototype 004 implementation has begun.
+- Implementation commit: **`80d724df05cf2f622b333a1bacef1f26e96ee435`**, `feat: add bounded foreground sensor sampling`, with the required DCO signoff.
+- Ordinary push succeeded to `origin/codex/alpha1-prototype003`; the local branch now tracks that remote branch.
+- One PR was opened: **[PR #2 — feat: add SiliconWatch Alpha 1 foreground sampling](https://github.com/lgraak/Siliconwatch/pull/2)**, base `main`, head `codex/alpha1-prototype003`. The remote diff matched the eight reviewed files, the implementation commit/signoff was present, and GitHub reported it mergeable. It remains open; no merge is authorized or performed.
+- `origin/main` remains `b918a2bc3618dbe77d6c6ce3656c9d6d19afa66d`; no history rewrite, force-push, or branch-protection change occurred.
 
-The new sample command requires --count (1–10,000) and --interval-ms (100–60,000), with optional --json-lines. It starts immediately, runs scans and output sequentially, schedules from the previous actual start, and reanchors after delays without catch-up bursts. Each attempt rediscovers hardware; failed attempts consume count and never reuse prior readings. The CLI retains only the current snapshot/output record, not history.
+Observed [Alpha 1 CI run 43954162954](https://github.com/lgraak/Siliconwatch/actions/runs/43954162954) completed successfully for exact HEAD **`80d724df05cf2f622b333a1bacef1f26e96ee435`**:
 
-Records contain checked monotonic timing, a nullable wall timestamp, and userspace observation-age bounds at record preparation. Physical sensor age is explicitly unknown. JSON Lines uses sampling envelope version 1 with unchanged snapshot schema 2 and identity schema 1. Serialization errors produce complete error records without stale values or freshness fields. Raw data, source evidence, row statuses, and diagnostic precedence are preserved.
+| Hosted check | Actual result |
+| --- | --- |
+| Rust 1.85.0 formatting | Passed |
+| Rust 1.85.0 Clippy, warnings denied | Passed |
+| Rust 1.85.0 tests | **53 passed, 0 failed, 0 ignored**, no conditional permission skips |
+| DCO checker tests | **6 passed, 0 failed** |
+| DCO contribution verification | Implementation commit passed |
 
-The latest authorization supersedes the proposal's exit policy: completing all requested attempts returns 0 even when scans or individual readings fail; consumers must inspect the records. Invalid arguments return 2. Unrecoverable timing/internal errors and output failures, including broken pipes, return 1. Existing sensors commands keep their prior behavior, including one-shot broken-pipe success. External interruption can leave an incomplete stream; no signal handler or guaranteed final summary was added.
+Both job summaries and their logs were inspected, and the run's HEAD SHA was independently confirmed. No hosted failure occurred. Hosted fixtures do not verify live hardware or establish real-time behavior.
 
-Formatting, Clippy with warnings denied, and all 53 tests passed on both Rust 1.100.0 and the declared minimum 1.85.0. There were zero failures, ignored tests, or conditional permission skips. All 31 original tests remain, with 22 additions covering bounds, fake-clock scheduling, delays, wall changes, freshness, fixture recovery, streaming, and output/exit failures. Existing CLI regressions passed. No hosted CI run is claimed for uncommitted work.
+The implementation push left the working tree clean. This documentation-only follow-up records the observed publication results without changing executable code or tests. Its own final SHA and the follow-up branch-head CI result are verified after its normal push and supplied in the final chat handoff and PR description; this table specifically records the implementation run above, not an assumed future result.
 
-Read-only ordinary-user hardware tests passed for both one-shot commands and short table/JSON Lines sampling. CachyOS kernel 7.3.4-1-cachyos on AMD Ryzen/Radeon/NVMe hardware exposed 11 inputs: nine successful readings and two unsupported GPU inputs, without permission errors or discovery warnings. IT8613/fans present in historical reports were absent; no current live fan validation is claimed. Three JSON scans took approximately 14.730–15.709 ms. Delays, clock jumps, and failures were simulated rather than induced on hardware.
+**Merge recommendation:** the reviewed implementation is ready for Chris's merge review, subject to green checks on the final PR head. The unexplained reason for IT8613's current absence is disclosed and is not a demonstrated Prototype 003 regression. No blocking implementation finding remains. Prototype 004 is only the small overhead-characterization proposal in Section 8, and has not begun.
 
-Changed files comprise the sampling module/tests, CLI/library integration, README, annotated proposal, and this report. Dependencies and existing reader/identity/tests are unchanged. HEAD remains b918a2bc3618dbe77d6c6ce3656c9d6d19afa66d; three tracked files are modified and five files untracked, with nothing staged. No commit, push, or PR was created.
+## HANDOFF TO CHATGPT
 
-Blocking drivers/output prevent hard runtime guarantees. Memory depends on one scan's size; suspend behavior, physical freshness, and performance budgets remain limitations. Decision 43 remains pending. Recommend Chris review this implementation before authorizing publication or a small Prototype 004 overhead-characterization milestone. Stop for review.
+SiliconWatch Alpha 1 Prototype 003 has completed final review and publication. The DCO-signed implementation commit is **80d724df05cf2f622b333a1bacef1f26e96ee435**, with message `feat: add bounded foreground sensor sampling`. It was pushed normally on **codex/alpha1-prototype003** and published as **[PR #2](https://github.com/lgraak/Siliconwatch/pull/2)** targeting main. The PR remains open and unmerged. The accepted foundation and existing history were preserved.
+
+The implementation adds a separate finite sample command with count 1–10,000, interval 100–60,000 ms, and explicit JSON Lines output. Sampling/output are sequential, targets derive from previous actual starts, and delays reanchor without catch-up bursts. Checked monotonic timing and separate wall timestamps support explicit userspace observation bounds; physical sensor age remains unknown. The CLI retains one current snapshot/record and never reuses values after failure. Completed attempts return 0 despite recoverable errors; invalid arguments return 2 and unrecoverable/output failures return 1. Existing one-shot behavior is preserved. No dependencies or excluded services/control features were added.
+
+Final local formatting, Clippy, and all **53 tests** passed again on Rust **1.100.0 and 1.85.0**, with zero failures, ignored tests, or conditional permission skips. All original CLI regressions passed. Both one-shot hardware commands and short foreground table/JSON Lines runs succeeded. Independent Python parsing checked counts, schemas 1/2/1, timing arithmetic, freshness, and recoverable/one-shot failure semantics. Controlled clocks and fixtures cover delays and failures; these were not induced on real hardware.
+
+Hosted **[CI run 43954162954](https://github.com/lgraak/Siliconwatch/actions/runs/43954162954)** passed formatting, Clippy, all 53 Rust tests, six DCO checker tests, and contribution signoff verification for the exact implementation commit. This report follow-up changes documentation only; its final commit/head-check results are supplied after publication in the final chat handoff and PR description.
+
+The 24-to-11 input investigation supports changed provider availability. Direct sysfs enumeration, the rebuilt accepted baseline, and Prototype 003 expose identical 11 provider/channel pairs: nine successful readings and two unsupported GPU inputs. IT8613 is absent and its installed it87 driver is not loaded. Earlier-boot journal evidence confirms successful IT8613E discovery; current-boot evidence does not explain its absence. The 13-input category delta is consistent with the missing provider, but exact historical attribution lacks a retained raw snapshot. No driver or configuration was changed; no current live fan validation is claimed.
+
+The eight-file PR was reviewed for scope and sensitive content. Main remains b918a2bc3618dbe77d6c6ce3656c9d6d19afa66d, and the branch tracks origin. Blocking I/O, suspend accounting, unknown physical freshness, per-scan memory size, and unmeasured performance budgets remain limitations. Decision 43 remains pending. Recommend merge only after Chris approves and final-head checks are green. Proposed Prototype 004 is reproducible bounded overhead characterization, without monitoring behavior changes; it is not implemented. Stop for review.
