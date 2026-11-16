@@ -171,7 +171,7 @@ Chris resolved the earlier stop condition by explicitly authorizing publication 
 
 The full combined PR contains 17 intended project files; the Prototype 002 commit contains 11 reviewed files. Fresh formatting, Clippy with warnings denied, and automated tests passed again: **31 passed, 0 failed, 0 ignored, no conditional skips**. No live hardware retest was performed during publication preparation. The authorized plan is one new DCO-signed commit, an ordinary feature-branch push including the two preserved predecessors, and one PR targeting `main`. Publication results are reported after execution in the final chat handoff; authentication, permission, or divergence failures must stop publication rather than trigger history repair.
 
-## HANDOFF TO CHATGPT
+## Publication preparation handoff — historical
 
 SiliconWatch Alpha 1 Prototype 002 is implemented and verified. Chris authorized publishing the complete local milestone history through the existing codex/alpha1-prototype002 branch and one pull request targeting GitHub main. This supersedes the earlier missing-history stop condition; the accepted design-decisions and Prototype 001 commits must remain unchanged with their DCO signoffs.
 
@@ -186,3 +186,60 @@ Prototype 001 provides one-shot temperature, voltage, and fan telemetry with raw
 Previous live validation found 24 inputs: 22 successful readings with best-effort identities and two unsupported GPU inputs with ambiguous-channel identities. Hardware was not retested during publication preparation. Reboot/re-enumeration stability, replacement safety, other hardware, Rust 1.85 compatibility, and performance budgets remain unverified; source candidates are not universal physical identities.
 
 The remaining publication actions are the authorized local commit, ordinary branch push, and single PR, followed by remote verification. No force-push, rebase, squash, cherry-pick, direct main update, branch-protection change, or merge is authorized. Any authentication, permission, or unexpected-divergence failure must be reported honestly. Prototype 003 remains only a proposal for bounded foreground sampling with explicit timing and deterministic failure handling; it requires separate review and has not begun.
+
+## Alpha 1 CI addition — 2026-11-16
+
+Chris authorized a narrowly scoped CI addition on the existing feature branch before merging PR #1. The existing Rust implementation, tests, dependency lockfile, README, architecture records, and prior commit history are unchanged. This addition advances Decision 41's DCO checks and adds basic quality gates; it does not implement Decision 23's future performance benchmarks or start Prototype 003.
+
+### Workflow and permissions
+
+[Alpha 1 CI](../../.github/workflows/alpha1.yml) runs on the default `pull_request` events (opened, synchronize, reopened) targeting `main`. It has two jobs on GitHub-hosted `ubuntu-24.04`:
+
+- **Rust 1.85.0:** install the exact declared minimum compiler with rustfmt and Clippy, then run `cargo fmt --check`, `cargo clippy --locked -- -D warnings`, and `cargo test --locked`. The job sets `RUSTUP_TOOLCHAIN=1.85.0`; locked resolution prevents incidental dependency updates. Timeout: 15 minutes.
+- **DCO signoffs:** obtain full history, run the checker’s six standard-library fixture tests, and verify every commit in the immutable event `base.sha..head.sha` range. Timeout: five minutes.
+
+The sole external action is `actions/checkout`, pinned in both jobs to `3d3c42e5aac5ba805825da76410c181273ba90b1` ([official v7.0.1 release](https://github.com/actions/checkout/releases/tag/v7.0.1)). Credentials are not persisted. Workflow permissions are only `contents: read`; no secrets, publishing credentials, cache, additional service, or elevated `pull_request_target` workflow is introduced. Rust checks the proposed merge; DCO checks actual contribution SHAs, not GitHub's unsigned synthetic merge commit.
+
+### DCO behavior
+
+The [checker](../../.github/scripts/check_dco.py) uses Python's standard library and Git. It requires at least one well-formed `Signed-off-by: Name <email>` in a final paragraph containing conventional single-line trailers. It checks all contribution commits, including genuine merges and side-parent contributions; existing base-only history is excluded. Missing objects, shallow history, invalid SHAs, and an empty range fail closed. Unsigned earlier commits cannot be hidden behind a signed tip.
+
+The checker verifies an attestation's presence and format, not cryptographic identity or legal authority. It deliberately does not require the signer to equal the author: the [DCO](https://developercertificate.org/) also permits certified onward contribution. No bot or merge exemptions are added. Use `git commit -s` for the conventional format. Folded or unconventional trailers may require adjustment. Commit messages are not interpolated into shell commands or echoed into workflow logs.
+
+The [fixture tests](../../.github/scripts/test_check_dco.py) create isolated temporary Git repositories and cover normal/Unicode signoffs, body examples, malformed names/emails including control characters, signed/unsigned chains, side branches, real versus synthetic merges, and unavailable or shallow history.
+
+### Actual local verification before publication
+
+| Check | Result |
+| --- | --- |
+| `cargo +1.85.0 fmt --check` | Passed unchanged; no formatter compatibility issue |
+| `cargo +1.85.0 clippy --locked --offline -- -D warnings` | Passed |
+| `cargo +1.85.0 test --locked --offline` | 31 passed, 0 failed, 0 ignored, no conditional permission skips |
+| Fresh temporary Cargo-home `fetch --locked` | Downloaded all 11 external locked crates successfully |
+| Fresh-cache/fresh-target Rust 1.85.0 test build | Again 31 passed, no failures or skips |
+| DCO checker fixture suite | 6 passed, 0 failed |
+| DCO check of the existing PR history | All three existing contribution commits passed |
+| Workflow configuration | YAML parsed; trigger, permissions, immutable pins, toolchain selection, full-history checkout, and quoted SHA inputs reviewed |
+| Change scope | Only workflow, checker, checker tests, and this report changed; no application or dependency edits |
+
+Rust 1.85 compatibility is now verified for the unchanged current sources and lockfile, superseding earlier notes that it was untested. The local default compiler remains unchanged. No live hardware readings were rerun for this CI-only addition; earlier hardware results remain historical evidence. GitHub runner results are separate from local results and must be observed after push in [PR #1 checks](https://github.com/lgraak/Siliconwatch/pull/1/checks); no hosted green result is claimed in this pre-publication record.
+
+### Risks, publication, and review
+
+PRs can modify their own workflow and checker, so CI configuration changes still require maintainer review. The workflow does not modify branch protection or make checks administratively mandatory. The Ubuntu runner image, preinstalled rustup, and package registry remain upstream dependencies; only the checkout action revision and Rust toolchain are pinned here.
+
+The CI commit is added normally with a DCO signoff to `codex/alpha1-prototype002`, after `ee12c50c56221de4e8cd252478d7f794c33a7d8b`. Its SHA and observed hosted results are reported in the final chat handoff. PR #1 is updated by the ordinary branch push; no new PR, history rewrite, force-push, protection change, or merge is authorized. A merge recommendation depends on observed green checks and Chris's final review. Prototype 003 remains unauthorized.
+
+## HANDOFF TO CHATGPT
+
+Chris authorized one narrowly scoped Alpha 1 CI addition before merging SiliconWatch PR #1. The existing feature branch is codex/alpha1-prototype002, initially at ee12c50c56221de4e8cd252478d7f794c33a7d8b. The prior architectural, Prototype 001, and Prototype 002 commits remain intact. No application source, existing Rust tests, dependencies, or README content changed.
+
+Four files comprise the addition: .github/workflows/alpha1.yml, .github/scripts/check_dco.py, .github/scripts/test_check_dco.py, and this milestone report. The workflow runs for opened, updated, or reopened pull requests targeting main. It uses two Ubuntu 24.04 jobs with bounded timeouts, only contents-read permissions, no persisted Git credentials, and the official checkout action pinned to immutable commit 3d3c42e5aac5ba805825da76410c181273ba90b1. No external DCO service, cache, or additional dependency was introduced.
+
+The Rust job installs and selects exact Rust 1.85.0, matching Cargo.toml's minimum, then checks formatting, Clippy with warnings denied, and tests. Clippy/tests use locked dependency resolution. Local Rust 1.85 formatting and Clippy passed unchanged. All 31 Rust tests passed with zero failures, ignored tests, or conditional skips. A fresh temporary Cargo home downloaded all locked dependencies, and a fresh test build passed again. Earlier uncertainty about minimum-toolchain compatibility is therefore resolved for the current code and lockfile.
+
+The DCO job checks every actual contribution commit in the event base/head SHA range, including real merges and side-parent commits while excluding GitHub's synthetic merge. It requires a well-formed final Signed-off-by trailer and fails on missing, shallow, invalid, or empty history. Six isolated checker tests passed, and all three existing contribution commits passed locally. This verifies attestation presence/format rather than cryptographic identity; it allows certified onward contribution without requiring author-name matching.
+
+No hardware reads were rerun during this CI addition. Physical sensor validation, reboot/re-enumeration identity stability, and performance budgets remain outside these checks. CI files themselves remain review-sensitive because a PR can change its own checker, and branch protection was not modified.
+
+The authorized next operation is a normal DCO-signed CI commit and push to update the existing PR, followed by inspecting actual Actions results. This report records local evidence before publication; the final handoff must supply the resulting commit hash, observed hosted check results, working-tree status, and merge recommendation. No green hosted result is assumed from local tests. No new PR, merge, force-push, or history rewrite is authorized. Prototype 003 has not started and remains unauthorized; stop after CI review.

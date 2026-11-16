@@ -1,0 +1,48 @@
+name: Alpha 1 CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust 1.85.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: 1.85.0
+      RUST_TEST_NOCAPTURE: '1'
+    steps:
+      - name: Check out the proposed merge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the declared minimum Rust toolchain
+        run: rustup toolchain install 1.85.0 --profile minimal --component rustfmt --component clippy
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --locked -- -D warnings
+      - name: Tests
+        run: cargo test --locked
+
+  dco:
+    name: DCO signoffs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out contribution history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test the DCO checker
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Verify every contribution commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 -B .github/scripts/check_dco.py "$BASE_SHA" "$HEAD_SHA"
