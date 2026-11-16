@@ -1,52 +1,123 @@
 use siliconwatch::hwmon::{self, Snapshot, Status};
+use siliconwatch::sampling;
 use std::env;
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "Usage: siliconwatch sensors [--json] [--hwmon-root PATH]
+       siliconwatch sample --count N --interval-ms M [--json-lines] [--hwmon-root PATH]
        siliconwatch --help
        siliconwatch --version
 
-Read one snapshot of Linux hwmon sensors without changing hardware settings.
+Read Linux hwmon sensors without changing hardware settings.
 --json             Emit an experimental JSON snapshot instead of a table.
---hwmon-root PATH  Read an alternate hwmon directory (default: /sys/class/hwmon).";
+--hwmon-root PATH  Read an alternate hwmon directory (default: /sys/class/hwmon).
+
+sample options:
+--count N          Required number of attempts, 1-10000 (failures count).
+--interval-ms M    Required start-to-start interval, 100-60000 milliseconds.
+--json-lines       Emit one experimental JSON record per attempt and flush it.
+
+Sampling completes with exit 0 even when attempts report recoverable errors.
+Output failures (including broken pipes) stop sampling with exit 1.
+Interruptions can leave an incomplete stream; no hard runtime deadline is promised.";
 
 enum Command {
-    Sensors { json: bool, root: PathBuf },
+    Sensors {
+        json: bool,
+        root: PathBuf,
+    },
+    Sample {
+        json_lines: bool,
+        root: PathBuf,
+        options: sampling::Options,
+    },
     Help,
     Version,
 }
 
-fn parse_args() -> Result<Command, String> {
-    let mut args = env::args_os().skip(1);
-    let first = args.next().ok_or("expected the sensors command")?;
+fn parse_args(mut args: impl Iterator<Item = OsString>) -> Result<Command, String> {
+    let first = args
+        .next()
+        .ok_or("expected the sensors or sample command")?;
     if first == "--help" || first == "-h" {
         return Ok(Command::Help);
     }
     if first == "--version" {
         return Ok(Command::Version);
     }
-    if first != "sensors" {
+    let sampling = first == "sample";
+    if first != "sensors" && !sampling {
         return Err(format!("unknown command: {}", first.to_string_lossy()));
     }
     let mut json = false;
+    let mut count = None;
+    let mut interval_ms = None;
+    let mut root_seen = false;
     let mut root = PathBuf::from("/sys/class/hwmon");
     while let Some(arg) = args.next() {
         match arg.to_str() {
-            Some("--json") => json = true,
+            Some("--json") if !sampling => json = true,
+            Some("--json-lines") if sampling => {
+                if json {
+                    return Err("duplicate --json-lines".into());
+                }
+                json = true;
+            }
+            Some("--count") if sampling => {
+                if count.is_some() {
+                    return Err("duplicate --count".into());
+                }
+                count = Some(
+                    u32::try_from(decimal_argument(args.next(), "--count")?)
+                        .map_err(|_| "--count is too large")?,
+                );
+            }
+            Some("--interval-ms") if sampling => {
+                if interval_ms.is_some() {
+                    return Err("duplicate --interval-ms".into());
+                }
+                interval_ms = Some(decimal_argument(args.next(), "--interval-ms")?);
+            }
             Some("--hwmon-root") => {
+                if sampling && root_seen {
+                    return Err("duplicate --hwmon-root".into());
+                }
                 let path = args.next().ok_or("--hwmon-root requires a path")?;
                 if path.is_empty() || path.to_str().is_some_and(|s| s.starts_with("--")) {
                     return Err("--hwmon-root requires a path".into());
                 }
                 root = path.into();
+                root_seen = true;
             }
             Some("--help" | "-h") => return Ok(Command::Help),
             _ => return Err(format!("unknown option: {}", arg.to_string_lossy())),
         }
     }
-    Ok(Command::Sensors { json, root })
+    if sampling {
+        let options = sampling::Options::new(
+            count.ok_or("sample requires --count")?,
+            interval_ms.ok_or("sample requires --interval-ms")?,
+        )?;
+        Ok(Command::Sample {
+            json_lines: json,
+            root,
+            options,
+        })
+    } else {
+        Ok(Command::Sensors { json, root })
+    }
+}
+
+fn decimal_argument(value: Option<OsString>, option: &str) -> Result<u64, String> {
+    let value = value.ok_or_else(|| format!("{option} requires a decimal integer"))?;
+    let text = value
+        .to_str()
+        .filter(|s| !s.is_empty() && s.bytes().all(|byte| byte.is_ascii_digit()))
+        .ok_or_else(|| format!("{option} requires a decimal integer"))?;
+    text.parse().map_err(|_| format!("{option} is too large"))
 }
 
 // Keep labels and filesystem error text from inserting control sequences in the terminal.
@@ -186,8 +257,63 @@ fn write_json_error(
     writeln!(out)
 }
 
+fn write_sample_table(out: &mut impl Write, record: sampling::Record) -> io::Result<()> {
+    let timing = &record.timing;
+    writeln!(
+        out,
+        "Sample {}/{}; interval {} ms",
+        record.sequence, record.requested_count, record.interval_ms
+    )?;
+    writeln!(
+        out,
+        "Monotonic offsets (ns): target {}, start {}, finish {}, prepared {}",
+        timing.target_start_ns, timing.started_ns, timing.finished_ns, timing.prepared_ns
+    )?;
+    writeln!(
+        out,
+        "Scan duration {} ns; start lateness {} ns; wall start {} Unix ms",
+        timing.scan_duration_ns,
+        timing.lateness_ns,
+        timing
+            .wall_start_unix_ms
+            .map(|stamp| stamp.to_string())
+            .unwrap_or_else(|| "unavailable".into())
+    )?;
+    if let Some(error) = &timing.wall_time_error {
+        writeln!(out, "Wall clock: {}", terminal_text(error))?;
+    }
+    let freshness = &record.freshness;
+    writeln!(out, "Observation basis: {}", freshness.basis)?;
+    if let (Some(lower), Some(upper)) = (freshness.lower_bound_ns, freshness.upper_bound_ns) {
+        writeln!(
+            out,
+            "Observation-age bounds at preparation: {lower}..{upper} ns; window exceeds interval: {}",
+            freshness
+                .observation_window_exceeds_interval
+                .unwrap_or(false)
+        )?;
+    }
+    writeln!(
+        out,
+        "Physical sensor age is unknown; preparation precedes serialization and output."
+    )?;
+    if let Some(snapshot) = &record.snapshot {
+        write_table(out, snapshot)?;
+    }
+    if let Some(error) = &record.error {
+        writeln!(
+            out,
+            "Attempt error ({}): {}",
+            terminal_text(&error.kind),
+            terminal_text(&error.message)
+        )?;
+    }
+    writeln!(out)?;
+    out.flush()
+}
+
 fn run() -> io::Result<ExitCode> {
-    let command = match parse_args() {
+    let command = match parse_args(env::args_os().skip(1)) {
         Ok(command) => command,
         Err(error) => {
             eprintln!("siliconwatch: {}\n\n{USAGE}", terminal_text(&error));
@@ -198,6 +324,24 @@ fn run() -> io::Result<ExitCode> {
     match command {
         Command::Help => writeln!(out, "{USAGE}")?,
         Command::Version => writeln!(out, "siliconwatch {}", env!("CARGO_PKG_VERSION"))?,
+        Command::Sample {
+            json_lines,
+            root,
+            options,
+        } => {
+            let result = sampling::run(&root, options, |record| {
+                if json_lines {
+                    sampling::write_json_line(record, &mut out)
+                } else {
+                    write_sample_table(&mut out, record)
+                }
+            });
+            // Sampling failures must not enter the one-shot broken-pipe success path.
+            if let Err(error) = result {
+                eprintln!("siliconwatch: {}", terminal_text(&error.to_string()));
+                return Ok(ExitCode::FAILURE);
+            }
+        }
         Command::Sensors { json, root } => match hwmon::scan(&root) {
             Ok(snapshot) if json => match serde_json::to_vec_pretty(&snapshot) {
                 // Buffer serialization so an unencodable path cannot leave partial JSON.
@@ -240,6 +384,27 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("siliconwatch: {}", terminal_text(&error.to_string()));
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_accepts_numeric_bounds_without_executing_them() {
+        for count in ["1", "10000"] {
+            for interval in ["100", "60000"] {
+                assert!(matches!(
+                    parse_args(
+                        ["sample", "--count", count, "--interval-ms", interval]
+                            .into_iter()
+                            .map(OsString::from)
+                    ),
+                    Ok(Command::Sample { .. })
+                ));
+            }
         }
     }
 }
