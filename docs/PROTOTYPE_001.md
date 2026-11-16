@@ -1,5 +1,7 @@
 # Alpha 1, Prototype 001
 
+This document describes the accepted Prototype 001 checkpoint. For the current identity fields and experimental JSON schema version 2, see [Prototype 002](milestones/002-stable-sensor-identity.md). The commands below remain supported.
+
 This prototype reads one snapshot from Linux `/sys/class/hwmon`. Its purpose is to prove discovery and parsing of real sensor data before building a daemon, API, or GUI. It does not implement those components or authorize protective actions.
 
 ## Build and run

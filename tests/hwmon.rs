@@ -19,7 +19,7 @@ fn converts_sparse_channels_and_preserves_labels_and_zero() {
         f.write(&format!("hwmon2/{attribute}"), raw);
     }
     let snapshot = scan(&f.root).unwrap();
-    assert_eq!(snapshot.schema_version, 1);
+    assert_eq!(snapshot.schema_version, 2);
     assert_eq!(snapshot.root, f.root);
     assert_eq!(snapshot.sensors.len(), channels.len());
     for (attribute, raw, raw_value, value, unit) in channels {

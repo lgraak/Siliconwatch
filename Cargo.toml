@@ -3,7 +3,7 @@ name = "siliconwatch"
 version = "0.1.0-alpha.1"
 edition = "2024"
 rust-version = "1.85"
-description = "Read-only Linux hwmon sensor discovery — Alpha 1, Prototype 001"
+description = "Read-only Linux hwmon monitoring with best-effort source identity"
 license = "GPL-3.0-only"
 repository = "https://github.com/lgraak/Siliconwatch"
 

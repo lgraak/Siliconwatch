@@ -78,6 +78,7 @@ fn write_table(out: &mut impl Write, snapshot: &Snapshot) -> io::Result<()> {
                 terminal_text(sensor.label.as_deref().unwrap_or(&sensor.attribute)),
                 value,
                 sensor.status.as_str(),
+                sensor.identity.status.as_str(),
             )
         })
         .collect();
@@ -99,21 +100,23 @@ fn write_table(out: &mut impl Write, snapshot: &Snapshot) -> io::Result<()> {
         .max()
         .unwrap_or(0)
         .max(5);
+    let status_width = rows.iter().map(|r| r.3.len()).max().unwrap_or(0).max(6);
+    let identity_width = rows.iter().map(|r| r.4.len()).max().unwrap_or(0).max(8);
     writeln!(out, "SiliconWatch - Hardware Sensors\n")?;
     writeln!(
         out,
-        "{:<device_width$}  {:<sensor_width$}  {:>value_width$}  STATUS",
-        "DEVICE", "SENSOR", "VALUE"
+        "{:<device_width$}  {:<sensor_width$}  {:>value_width$}  {:<status_width$}  IDENTITY",
+        "DEVICE", "SENSOR", "VALUE", "STATUS"
     )?;
     writeln!(
         out,
         "{}",
-        "-".repeat(device_width + sensor_width + value_width + 18)
+        "-".repeat(device_width + sensor_width + value_width + status_width + identity_width + 8)
     )?;
-    for (device, sensor, value, status) in rows {
+    for (device, sensor, value, status, identity) in rows {
         writeln!(
             out,
-            "{device:<device_width$}  {sensor:<sensor_width$}  {value:>value_width$}  {status}"
+            "{device:<device_width$}  {sensor:<sensor_width$}  {value:>value_width$}  {status:<status_width$}  {identity}"
         )?;
     }
     let ok = snapshot
@@ -139,6 +142,21 @@ fn write_table(out: &mut impl Write, snapshot: &Snapshot) -> io::Result<()> {
                 terminal_text(error)
             )?;
         }
+        writeln!(
+            out,
+            "Identity v{} {}: {}",
+            sensor.identity.schema_version,
+            terminal_text(&sensor.source_path.to_string_lossy()),
+            sensor
+                .identity
+                .candidate
+                .as_deref()
+                .map(terminal_text)
+                .unwrap_or_else(|| "no candidate".into())
+        )?;
+        for issue in &sensor.identity.issues {
+            writeln!(out, "  Identity: {}", terminal_text(issue))?;
+        }
     }
     for warning in &snapshot.warnings {
         writeln!(
@@ -160,7 +178,7 @@ fn write_json_error(
     serde_json::to_writer_pretty(
         &mut *out,
         &serde_json::json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "root": root.to_string_lossy(),
             "error": { "kind": kind, "message": message }
         }),

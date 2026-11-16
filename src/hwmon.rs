@@ -1,3 +1,4 @@
+use crate::identity::{self, SourceIdentity};
 use serde::Serialize;
 use std::fs;
 use std::io;
@@ -19,6 +20,7 @@ pub struct Warning {
 
 #[derive(Debug, Serialize)]
 pub struct Sensor {
+    pub identity: SourceIdentity,
     pub device: String,
     pub device_path: PathBuf,
     pub attribute: String,
@@ -61,11 +63,12 @@ impl Status {
 /// Read existing hwmon attributes without changing hardware or configuration.
 pub fn scan(root: &Path) -> io::Result<Snapshot> {
     let mut snapshot = Snapshot {
-        schema_version: 1,
+        schema_version: 2,
         root: root.to_path_buf(),
         sensors: Vec::new(),
         warnings: Vec::new(),
     };
+    let root_canonical = fs::canonicalize(root).ok();
     for path in entries(root, &mut snapshot.warnings)? {
         let fallback = path.file_name().unwrap_or_default().to_string_lossy();
         if !numbered(&fallback, "hwmon") {
@@ -84,7 +87,9 @@ pub fn scan(root: &Path) -> io::Result<Snapshot> {
             path.clone()
         });
         let name_path = path.join("name");
-        let device = match fs::read_to_string(&name_path) {
+        let name = fs::read_to_string(&name_path);
+        let device_identity = identity::for_device(&path, root_canonical.as_deref(), &name);
+        let device = match name {
             Ok(name) if !name.trim().is_empty() => name.trim().to_owned(),
             result => {
                 let message = match result {
@@ -110,15 +115,18 @@ pub fn scan(root: &Path) -> io::Result<Snapshot> {
             if !attribute.ends_with("_input") {
                 continue;
             }
-            snapshot.sensors.push(read_sensor(
+            let mut sensor = read_sensor(
                 &device,
                 &device_path,
                 &source_path,
                 &mut snapshot.warnings,
                 |path| fs::read_to_string(path),
-            ));
+            );
+            sensor.identity = device_identity.for_channel(&sensor.attribute);
+            snapshot.sensors.push(sensor);
         }
     }
+    identity::mark_collisions(&mut snapshot.sensors);
     snapshot
         .warnings
         .sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.message.cmp(&b.message)));
@@ -156,6 +164,7 @@ fn read_sensor(
         }
     };
     let mut sensor = Sensor {
+        identity: SourceIdentity::unresolved(),
         device: device.to_owned(),
         device_path: device_path.to_path_buf(),
         attribute: attribute.clone(),

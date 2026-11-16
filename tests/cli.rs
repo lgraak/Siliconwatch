@@ -40,7 +40,7 @@ fn json_is_clean_and_partial_readings_still_succeed() {
         .unwrap();
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["schema_version"], 2);
     let sensors = json["sensors"].as_array().unwrap();
     assert_eq!(sensors.len(), 2);
     let valid = sensors
@@ -57,6 +57,12 @@ fn json_is_clean_and_partial_readings_still_succeed() {
         .unwrap();
     assert_eq!(invalid["status"], "invalid");
     assert!(invalid["value"].is_null());
+    for sensor in sensors {
+        assert_eq!(sensor["identity"]["schema_version"], 1);
+        assert_eq!(sensor["identity"]["status"], "insufficient_evidence");
+        assert!(sensor["identity"]["candidate"].is_null());
+        assert!(!sensor["identity"]["issues"].as_array().unwrap().is_empty());
+    }
 }
 
 #[test]
@@ -72,6 +78,51 @@ fn root_failure_uses_exit_one_and_json_error_object() {
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(json.is_object());
     assert!(json.get("error").is_some());
+    assert_eq!(json["schema_version"], 2);
+}
+
+#[test]
+fn terminal_and_json_expose_the_same_versioned_identity_evidence() {
+    use std::{fs, os::unix::fs::symlink};
+    let f = Fixture::new();
+    let parent = f.root.parent().unwrap().join("controller-\"quoted\"");
+    fs::create_dir(&parent).unwrap();
+    f.write("hwmon4/name", " fixture-chip \n");
+    f.write("hwmon4/temp1_input", "42500\n");
+    symlink(&parent, f.root.join("hwmon4/device")).unwrap();
+    let run = |json| {
+        let mut command = cli();
+        command.args(["sensors", "--hwmon-root"]).arg(&f.root);
+        if json {
+            command.arg("--json");
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success());
+        output.stdout
+    };
+    let output: serde_json::Value = serde_json::from_slice(&run(true)).unwrap();
+    assert_eq!(output["schema_version"], 2);
+    let identity = &output["sensors"][0]["identity"];
+    assert_eq!(identity["schema_version"], 1);
+    assert_eq!(identity["status"], "best_effort");
+    let candidate = identity["candidate"].as_str().unwrap();
+    let parts: serde_json::Value = serde_json::from_str(candidate).unwrap();
+    assert_eq!(
+        parts,
+        serde_json::json!([
+            "siliconwatch.hwmon-source",
+            1,
+            "fixture-chip",
+            parent,
+            "temp1_input",
+            "temperature_input_millidegree_celsius"
+        ])
+    );
+    assert!(identity["issues"].as_array().unwrap().is_empty());
+    let table = String::from_utf8(run(false)).unwrap();
+    for text in ["IDENTITY", "best_effort", "Identity v1", candidate, "42.5"] {
+        assert!(table.contains(text), "missing {text:?}");
+    }
 }
 
 #[test]
