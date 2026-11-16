@@ -2,3 +2,4 @@
 
 pub mod hwmon;
 pub mod identity;
+pub mod sampling;

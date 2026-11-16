@@ -10,7 +10,7 @@ SiliconWatch is an open-source project for native Linux hardware monitoring and 
 
 Understand what your hardware is doing, spot problems early, and keep a record of what happened when a protection rule was triggered.
 
-**Status: Alpha 1, Prototype 002.** A read-only Rust CLI discovers Linux `hwmon` sensors, prints a terminal table or JSON, and reports best-effort source identities with explicit ambiguity handling. This is an experimental snapshot reader; the broader capabilities below remain planned.
+**Status: Alpha 1, Prototype 003.** A read-only Rust CLI discovers Linux `hwmon` sensors, reports best-effort source identities, and supports bounded foreground sampling with explicit timing and recoverable errors. This is experimental monitoring; the broader capabilities below remain planned.
 
 ## Try the prototype
 
@@ -19,9 +19,11 @@ On Linux with Rust 1.85 or newer:
 ```bash
 cargo run -- sensors
 cargo run -- sensors --json
+cargo run -- sample --count 5 --interval-ms 1000
+cargo run -- sample --count 5 --interval-ms 1000 --json-lines
 ```
 
-Run as your normal user. See [Prototype 002 usage, identity rules, and limitations](docs/milestones/002-stable-sensor-identity.md) for the current JSON format and fixture-based validation. The prototype does not control hardware or perform protective actions.
+Run as your normal user. See [Prototype 003 sampling, output, and limitations](docs/milestones/003-bounded-foreground-sampling.md) and [Prototype 002 identity rules](docs/milestones/002-stable-sensor-identity.md). Sampling exit 0 means all attempts completed, even if individual attempts report errors; inspect each output record. The prototype does not control hardware or perform protective actions.
 
 ## What we're building
 
