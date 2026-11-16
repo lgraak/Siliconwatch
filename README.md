@@ -10,7 +10,18 @@ SiliconWatch is an open-source project for native Linux hardware monitoring and 
 
 Understand what your hardware is doing, spot problems early, and keep a record of what happened when a protection rule was triggered.
 
-**Status: early development planning.** Application code and releases are not available yet. The capabilities below describe the project's direction.
+**Status: Alpha 1, Prototype 002.** A read-only Rust CLI discovers Linux `hwmon` sensors, prints a terminal table or JSON, and reports best-effort source identities with explicit ambiguity handling. This is an experimental snapshot reader; the broader capabilities below remain planned.
+
+## Try the prototype
+
+On Linux with Rust 1.85 or newer:
+
+```bash
+cargo run -- sensors
+cargo run -- sensors --json
+```
+
+Run as your normal user. See [Prototype 002 usage, identity rules, and limitations](docs/milestones/002-stable-sensor-identity.md) for the current JSON format and fixture-based validation. The prototype does not control hardware or perform protective actions.
 
 ## What we're building
 
@@ -26,7 +37,7 @@ The local API is foundational to the initial headless daemon and CLI. Authentica
 
 Rust is the implementation language. Slint is the preferred GUI framework, pending compatibility testing. SiliconWatch draws inspiration in part from HWiNFO64 and is independently developed for Linux.
 
-Detailed architecture, roadmap, security guidance, and design rationale will live in separate documents under `docs/`, with contributor guidance in `CONTRIBUTING.md` as development takes shape.
+The [design decisions](docs/DESIGN_DECISIONS.md) capture accepted project direction and pending questions. Detailed architecture, roadmap, and security guidance will follow under `docs/`, with contributor guidance in `CONTRIBUTING.md` as development takes shape.
 
 ## Help shape SiliconWatch
 
