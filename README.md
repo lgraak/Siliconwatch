@@ -10,7 +10,18 @@ SiliconWatch is an open-source project for native Linux hardware monitoring and 
 
 Understand what your hardware is doing, spot problems early, and keep a record of what happened when a protection rule was triggered.
 
-**Status: early development planning.** Application code and releases are not available yet. The capabilities below describe the project's direction.
+**Status: Alpha 1, Prototype 001.** A read-only Rust CLI discovers Linux `hwmon` sensors and prints a terminal table or JSON. This is an experimental snapshot reader; the broader capabilities below remain planned.
+
+## Try the prototype
+
+On Linux with Rust 1.85 or newer:
+
+```bash
+cargo run -- sensors
+cargo run -- sensors --json
+```
+
+Run as your normal user. See [prototype usage and limitations](docs/PROTOTYPE_001.md) for supported inputs, output fields, and fixture-based testing. The prototype does not control hardware or perform protective actions.
 
 ## What we're building
 
