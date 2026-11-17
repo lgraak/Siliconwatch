@@ -393,6 +393,23 @@ impl Drop for CacheOwner {
 }
 
 impl CacheReader {
+    /// Nonblocking API read. None means contention; poison remains an error.
+    /// Like read(), this never acquires sensors or retains an older generation.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn try_read(&self) -> Result<Option<ReadView<'_>>, CacheError> {
+        let guard = match self.shared.state.try_read() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(CacheError::Poisoned),
+        };
+        let last_assessed = guard.published();
+        Ok(Some(ReadView {
+            guard,
+            shared: &self.shared,
+            last_assessed,
+        }))
+    }
+
     /// Borrow the complete latest publication. Never scans or hides poisoning.
     pub fn read(&self) -> Result<ReadView<'_>, CacheError> {
         let guard = self.shared.state.read().map_err(|_| CacheError::Poisoned)?;
@@ -485,3 +502,6 @@ impl ReadView<'_> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, target_os = "linux"))]
+mod api_tests;

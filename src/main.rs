@@ -8,7 +8,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "Usage: siliconwatch sensors [--json] [--hwmon-root PATH]
        siliconwatch sample --count N --interval-ms M [--json-lines] [--hwmon-root PATH]
-       siliconwatch daemon --interval-ms M --stale-after-ms M [--hwmon-root PATH]
+       siliconwatch daemon --interval-ms M --stale-after-ms M [--hwmon-root PATH] [--local-api]
        siliconwatch --help
        siliconwatch --version
 
@@ -28,6 +28,7 @@ Interruptions can leave an incomplete stream; no hard runtime deadline is promis
 daemon options:
 --interval-ms M    Required foreground acquisition interval, 100-60000 milliseconds.
 --stale-after-ms M Required positive observation-age budget in milliseconds.
+--local-api        Enable owner-only Linux JSON API in $XDG_RUNTIME_DIR/siliconwatch/api.sock.
 
 Daemon runs in the foreground; SIGINT/SIGTERM request cooperative shutdown.
 It writes lifecycle notices to stderr, uses no stdout telemetry, and requires no root.
@@ -131,6 +132,7 @@ fn parse_daemon_args(mut args: impl Iterator<Item = OsString>) -> Result<Command
     let mut interval_ms = None;
     let mut stale_after_ms = None;
     let mut root = None;
+    let mut local_api = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--interval-ms") => {
@@ -144,6 +146,12 @@ fn parse_daemon_args(mut args: impl Iterator<Item = OsString>) -> Result<Command
                     return Err("duplicate --stale-after-ms".into());
                 }
                 stale_after_ms = Some(decimal_argument(args.next(), "--stale-after-ms")?);
+            }
+            Some("--local-api") => {
+                if local_api {
+                    return Err("duplicate --local-api".into());
+                }
+                local_api = true;
             }
             Some("--hwmon-root") => {
                 if root.is_some() {
@@ -164,7 +172,8 @@ fn parse_daemon_args(mut args: impl Iterator<Item = OsString>) -> Result<Command
         options: daemon::Options::new(
             interval_ms.ok_or("daemon requires --interval-ms")?,
             stale_after_ms.ok_or("daemon requires --stale-after-ms")?,
-        )?,
+        )?
+        .with_local_api(local_api),
     })
 }
 
