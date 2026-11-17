@@ -10,7 +10,7 @@ SiliconWatch is an open-source project for native Linux hardware monitoring and 
 
 Understand what your hardware is doing, spot problems early, and keep a record of what happened when a protection rule was triggered.
 
-**Status: Alpha 1, Prototype 008 (local implementation).** A read-only Rust CLI discovers Linux `hwmon` sensors, reports best-effort source identities, supports bounded foreground sampling, and runs a foreground acquisition service with a shared snapshot cache and cooperative shutdown. This is experimental monitoring; the broader capabilities below remain planned.
+**Status: Alpha 1, Prototype 009 (technically accepted by Chris on November 17, 2026, with documented limitations; publication pending).** A read-only Rust CLI discovers Linux `hwmon` sensors, reports best-effort source identities, supports bounded foreground sampling, and runs a foreground acquisition service with a shared snapshot cache, cooperative shutdown, and an opt-in current-user local JSON API. This is experimental monitoring; the broader capabilities below remain planned.
 
 ## Try the prototype
 
@@ -26,7 +26,7 @@ cargo run -- daemon --interval-ms 1000 --stale-after-ms 3000
 
 Run as your normal user. See [Prototype 003 sampling, output, and limitations](docs/milestones/003-bounded-foreground-sampling.md) and [Prototype 002 identity rules](docs/milestones/002-stable-sensor-identity.md). Sampling exit 0 means all attempts completed, even if individual attempts report errors; inspect each output record. The prototype does not control hardware or perform protective actions.
 
-The foreground `daemon` command writes lifecycle notices to stderr and stops cooperatively on Ctrl-C or SIGTERM. It has no external telemetry API or service installer. A blocked scan or output stream can delay shutdown. See [Prototype 008 lifecycle, freshness, and exit behavior](docs/milestones/008-headless-daemon-lifecycle.md).
+The foreground `daemon` command writes lifecycle notices to stderr and stops cooperatively on Ctrl-C or SIGTERM. Add `--local-api` to expose the two read-only methods over `$XDG_RUNTIME_DIR/siliconwatch/api.sock`. The runtime directory must already be private and owned by your non-root user. The API is disabled by default and never initiates sensor scans. See the [local API v1 contract and client example](docs/api/local-v1.md) and [Prototype 009 report](docs/milestones/009-local-readonly-api.md). There is no service installer. A blocked scan or output stream can delay shutdown. See [Prototype 008 lifecycle, freshness, and exit behavior](docs/milestones/008-headless-daemon-lifecycle.md).
 
 ## What we're building
 

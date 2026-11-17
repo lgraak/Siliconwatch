@@ -1,6 +1,6 @@
 # SiliconWatch Design Decisions
 
-> **Status:** Design record, pre-alpha. Decisions 1–42 are accepted project direction, not claims of implemented functionality. Decision 43 is pending. This document is a planning reference, not a release or security certification.
+> **Status:** Design record, pre-alpha. Decisions 1–42 are accepted project direction, not claims of implemented functionality. Decision 43 is approved for Alpha 1 current-user, read-only local access; broader permissions remain pending. This document is a planning reference, not a release or security certification.
 
 SiliconWatch is an independent Rust-based Linux hardware monitoring project inspired by the depth of HWiNFO64. The initial engineering target is an efficient headless daemon, CLI, and local API. A native GUI follows as an API client.
 
@@ -13,7 +13,7 @@ SiliconWatch is an independent Rust-based Linux hardware monitoring project insp
 - **Pending** decisions must not be treated as implementation requirements until approved.
 - Changes to accepted decisions require an explicit new entry in the revision log and an update to the affected entry; do not silently reinterpret them.
 - Protective actions remain **disabled until explicitly authorized**. Notification severity, imported profiles, simulations, and escalation do not confer authorization.
-- Monitoring access, configuration authority, and authorization for disruptive actions are distinct. The specific local permissions policy remains pending under Decision 43; no option has been approved.
+- Monitoring access, configuration authority, and authorization for disruptive actions are distinct. Decision 43 approves only Alpha 1 current-user, peer-verified read access. Multiuser sharing, configuration writes and disruptive-action permissions remain pending.
 - Implementation details not settled here should be recorded as proposals rather than attributed to these decisions.
 
 ## Service, interfaces, and distribution
@@ -26,9 +26,11 @@ Install the system-wide monitoring daemon to start at boot by default, with prom
 
 ### 5. Local-first, remote-ready interfaces — Accepted
 
-Implement the local API first, using D-Bus as the initial direction, while keeping interfaces suitable for future authenticated remote access.
+**Initial direction — 2026-11-16:** Implement the local API first, using D-Bus as the initial direction, while keeping interfaces suitable for future authenticated remote access.
 
 **Why:** Headless CLI and future GUI should reuse the same sensor cache and command contracts.
+
+**Alpha 1 policy approved by Chris — 2026-11-17:** Use an explicitly enabled pathname Unix-domain socket with versioned JSON requests/responses and the current-user read-only policy in Decision 43. The API consumes the existing shared cache and never triggers hardware acquisition. D-Bus and system-wide access are deferred. This records the approved Prototype 009 change in direction while preserving the earlier rationale; it does not authorize TCP, remote access, deployment or hardware controls.
 
 ### 6. Pull and push remote telemetry — Accepted
 
@@ -278,13 +280,17 @@ Require Developer Certificate of Origin (DCO) commit signoffs, checked in contri
 
 **Why:** Provide a lightweight statement of contribution rights and respect for proprietary third-party work.
 
-## Pending decisions
+## Local API permissions and remaining decisions
 
-### 43. Local API permissions — Pending
+### 43. Local API permissions — Approved for Alpha 1 current-user reads; broader policy Pending
 
-Determine local read access, administrator configuration rights, and independent authorization for disruptive actions across D-Bus, CLI, GUI, and shared systems. No option is accepted yet.
+**Original question — 2026-11-16 (historical):** Determine local read access, administrator configuration rights, and independent authorization for disruptive actions across D-Bus, CLI, GUI, and shared systems. No option is accepted yet.
 
-**Existing constraints:** Decisions 7, 15, and 26 already require remote authentication, least-privilege operation, and a shared system-wide daemon. Do not infer the final local policy from those constraints alone.
+**Original constraints:** Decisions 7, 15, and 26 require remote authentication, least-privilege operation, and a shared system-wide daemon as project direction. Do not infer broader permissions from those constraints alone.
+
+**Alpha 1 policy approved by Chris — 2026-11-17:** Prototype 009 may expose only versioned informational and snapshot reads through an opt-in local pathname Unix socket. Require the daemon's real and effective UIDs to match and be nonzero, a private owner-controlled runtime namespace and restrictive socket permissions, and kernel peer credentials matching the daemon's effective UID before parsing requests. The endpoint grants no configuration, acquisition-scheduling or hardware-control authority. Environment paths require validation; existing/stale endpoints must not be overwritten or automatically removed. Read-only clients consume the same cache as the acquisition owner.
+
+This approval does **not** authorize remote API access, multiuser/system-wide sharing, write operations, privileged execution or hardware controls. Same-UID programs and root are outside the isolation boundary. Decision 26 remains the future shared-service direction; its permissions, D-Bus, administrator configuration rights and disruptive-action authorization require separate review. See the [approved implementation proposal](milestones/009-local-readonly-api-proposal.md) and [implementation report](milestones/009-local-readonly-api.md). Policy approval authorizes local implementation and verification, not production readiness or milestone acceptance.
 
 #### Prototype 005 completion authorization — 2026-11-16
 
@@ -326,7 +332,7 @@ These questions identify wording tensions and implementation details left open b
 | Area | Related decisions | Clarification requested |
 | --- | --- | --- |
 | Meaning of validation | 2, 35, 36; invariant 1 | Does “validated data” mean structurally valid cache records that can still be flagged questionable, or only readings approved for protection? The latter interpretation conflicts with displaying questionable readings and preserving raw alternatives. |
-| Local permissions and source trust | 2, 7, 10, 15, 26, 35, 36, 43 | Who may monitor, configure, validate sensor mappings, and independently authorize disruptive actions? What changes to a provider, sensor identity, or calibration invalidate prior validation? The local permissions policy remains **PENDING**. |
+| Local permissions and source trust | 2, 7, 10, 15, 26, 35, 36, 43 | Alpha 1 current-user, peer-verified read access is approved under Decision 43. Multiuser access, configuration, validation of sensor mappings and independent disruptive-action authorization remain pending. What changes to provider, identity or calibration invalidate prior validation? |
 | Derived data, timing, and missing sensors | 4, 10, 12, 25, 33, 35, 36, 37 | How do stale, missing, questionable, or simulated inputs propagate through formulas and provider fallback? How do adaptive polling and suspend gaps affect moving averages, rate calculations, alarm timing, and statistics? What observable degraded state applies when protection lacks fresh evidence? |
 | Simulation and external effects | 11, 19, 39, 42; invariants 1–3 | How are replay and simulated samples isolated from live protection while preserving their provenance? May simulations emit real notifications, webhooks, or controller-facing events that could trigger external actions? The prohibition on calling the real shutdown mechanism remains unchanged. |
 | Persistence and recovery | 3, 16, 25, 31, 38; invariant 4 | How are incident evidence and service-failure events reported when storage is full or unavailable? What happens if an already authorized protective action cannot persist its explanation? How are retention gaps represented during historical replay or reconnect synchronization? |
@@ -342,10 +348,11 @@ These questions identify wording tensions and implementation details left open b
 | 2026-11-16 | Integrated the supplied record into `docs/`; preserved all accepted decision text and pending Decision 43; added explicit project context, consistent heading spacing, and non-normative review questions. | Integration draft; awaiting review |
 | 2026-11-16 | Added Chris's bounded Prototype 005 completion authorization under Decision 43, preserving its local API permissions question, numbering and history; documented separate evidence and non-retroactive bracketing. | Execution authorized within stated bounds; Prototype 005 acceptance Pending; local API permissions Pending |
 | 2026-11-16 | Recorded Chris's subsequent formal Prototype 005 technical acceptance with documented limitations and a separate publication-readiness review; retained all earlier authorization history. | Prototype 005 Accepted; publication not authorized; local API permissions Pending |
+| 2026-11-17 | Recorded Chris's Prototype 009 implementation authorization: Alpha 1 pathname Unix socket/versioned JSON replaces the initial D-Bus direction; current-user, peer-verified read-only access is approved. Prior decision and Prototype 005 history retained. | Decisions 5/43 updated for the narrow Alpha 1 policy; broader permissions Pending; local implementation/testing only |
 
 ## Next steps
 
 1. Review this consolidation against the agreed conversations. Correct any wording that overstates a decision.
-2. Decide question 43 and append the accepted choice with its rationale.
+2. Review the remaining Decision 43 permissions separately; do not expand the approved Alpha 1 read-only policy implicitly.
 3. Convert major sections into architecture and implementation specifications as engineering begins.
 4. Keep this record synchronized with later explicit decisions and their revision dates.

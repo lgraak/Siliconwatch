@@ -115,6 +115,7 @@ dependencies = [
 name = "siliconwatch"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "signal-hook",

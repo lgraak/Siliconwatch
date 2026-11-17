@@ -1,4 +1,4 @@
-//! Foreground lifecycle only: one cache owner, cooperative shutdown, no read API.
+//! Foreground lifecycle: one cache owner, cooperative shutdown, opt-in local API.
 //! A stop request closes admission; a previously admitted scan may still publish.
 //! Blocking reads, borrowed cache views and output can delay joining indefinitely.
 
@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 pub struct Options {
     interval: Duration,
     stale_after: Duration,
+    local_api: bool,
 }
 
 impl Options {
@@ -28,7 +29,14 @@ impl Options {
         Ok(Self {
             interval: Duration::from_millis(interval_ms),
             stale_after: Duration::from_millis(stale_after_ms),
+            local_api: false,
         })
+    }
+
+    /// Opt in to the current-user Linux API. It is disabled by default.
+    pub fn with_local_api(mut self, enabled: bool) -> Self {
+        self.local_api = enabled;
+        self
     }
 }
 
@@ -305,6 +313,16 @@ fn finish(
     // Keep the worker's original fatal cause ahead of a concurrent stop/output error.
     append_error(&mut result, coordinator);
     append_error(&mut result, stopped);
+    report_stopped(control, reader, result, out)
+}
+
+// Call only after every successfully created worker has been joined.
+fn report_stopped(
+    control: &Control,
+    reader: &CacheReader,
+    mut result: io::Result<()>,
+    out: &mut impl Write,
+) -> io::Result<()> {
     let lifecycle = control.stopped();
     let state_available = lifecycle.is_ok();
     append_error(&mut result, lifecycle);
@@ -375,6 +393,15 @@ fn spawn_or_stop(
 /// are process-global: call from the CLI, not concurrently or from a library host.
 /// Reads only the supplied hwmon root. Never installs a service or controls hardware.
 pub fn run(root: &Path, options: Options) -> io::Result<()> {
+    if options.local_api {
+        #[cfg(target_os = "linux")]
+        return api::run(root, options);
+        #[cfg(not(target_os = "linux"))]
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "the local API requires Linux",
+        ));
+    }
     run_registered(root, options, || Signals::new([SIGINT, SIGTERM]))
 }
 
@@ -434,3 +461,6 @@ fn run_registered(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(target_os = "linux")]
+mod api;
