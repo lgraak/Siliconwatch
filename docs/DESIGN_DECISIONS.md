@@ -286,6 +286,30 @@ Determine local read access, administrator configuration rights, and independent
 
 **Existing constraints:** Decisions 7, 15, and 26 already require remote authentication, least-privilege operation, and a shared system-wide daemon. Do not infer the final local policy from those constraints alone.
 
+#### Prototype 005 completion authorization — 2026-11-16
+
+At Chris's request, this entry records a separate, limited development-execution authorization. **Decision 43's local API permissions policy remains Pending; no permission option is approved by this entry.**
+
+Chris authorizes the bounded completion protocol in the [Prototype 005 completion proposal](milestones/005-provider-latency-completion-proposal.md):
+
+- Implement the minimal Python-only single-block completion mode and deterministic fixture tests, including cleanup and signal handling through final evidence preservation. Use the existing Rust 1.85.0 release binary without rebuilding it; preserve application source, dependencies, schemas, sensor identity and sampling semantics.
+- Run six short smoke cases. Only if all preflight gates and smoke cases pass, run one fresh seven-case block in this order: full scan before, amdgpu, k10temp, Wi-Fi, acpitz, NVMe, full scan after. Retain the proposal's 11-attempt smokes, 301-attempt primary cases, 100 ms interval and JSON Lines output.
+- Limit the new session to **600 seconds total**, including preflight, smoke, settling, measurements and finalization, and **128 MiB of new evidence**. Keep combined preserved and new local measurement evidence within the proposal's 256 MiB limit.
+- Permit **no retries or additional hardware runs without separate authorization**. Stop on failed preflight, identity validation, resource limits or smoke tests; retain failure evidence rather than silently continuing.
+- Preserve all original and incomplete measurements, hashes, timestamps and recovery records. Store new evidence separately. Do not reconstruct unavailable CPU accounting, exit statuses, total attempt counts or execution durations.
+
+**Why a fresh block is required:** the original third block contains an earlier full-before control and completed amdgpu, k10temp and Wi-Fi observations, but acpitz was interrupted, NVMe was unstarted and the closing full-scan control was never recorded. A control measured in a later session cannot establish the earlier session's intervening workload, thermal or scheduling conditions, so it cannot retroactively provide equivalent bracketing. Report original blocks one and two plus the fresh complete block as distinct-session comparisons; preserve the original incomplete block separately. Do not relabel new measurements as resumed historical cases or infer driver causality from latency associations.
+
+**Prototype 005 acceptance at execution authorization: Pending.** Execution authorization does not constitute milestone acceptance. Completion must be assessed against actual verification results, preserved evidence and the approved acceptance criteria. The existing [milestone report](milestones/005-provider-latency-characterization.md) and [measurement report](benchmarks/005-provider-latency-results.md) retain the partial experiment; this historical entry records the subsequent execution authorization without rewriting that history or the proposal's earlier unapproved status.
+
+No commit, push, merge or pull request is authorized. Prototype 006 must not begin. This documentation update itself performs no benchmark-code modification or hardware characterization; stop after the update and handoff, as Chris requested.
+
+#### Prototype 005 technical acceptance — 2026-11-16
+
+**Chris formally accepted Alpha 1, Prototype 005 as technically complete with its documented limitations.** The [formal acceptance record](milestones/005-provider-latency-characterization.md#formal-acceptance-and-publication-review--2026-11-16) records successful deterministic validation, the completed authorized characterization, independent evidence verification and preservation of original observations. The original third block remains incomplete; the fresh seven-case block is a separate cohort. Exit 143 and the historical 503.365 ms event remain unexplained, and NVMe-registration latency association does not establish driver causality.
+
+This is milestone acceptance, separate from the earlier hardware execution authorization and from any future Git publication authorization. **Decision 43's local API permissions policy remains Pending; no local API access option is approved.** No additional hardware runs, staging, commits, push, merge, PR or Prototype 006 work are authorized by acceptance. See the [publication-readiness review](milestones/005-publication-readiness.md) for the audited proposed change set and remaining limitations.
+
 ## Cross-cutting implementation invariants
 
 1. **Acquisition is shared:** Providers feed one daemon-owned sensor cache; CLI, GUI, history, formulas, alarms, and remote clients consume validated data rather than independently polling hardware.
@@ -316,6 +340,8 @@ These questions identify wording tensions and implementation details left open b
 | --- | --- | --- |
 | 2026-11-16 | Initial consolidated record of decisions 1–42 from project discussions; decision 43 explicitly pending. | Draft for review |
 | 2026-11-16 | Integrated the supplied record into `docs/`; preserved all accepted decision text and pending Decision 43; added explicit project context, consistent heading spacing, and non-normative review questions. | Integration draft; awaiting review |
+| 2026-11-16 | Added Chris's bounded Prototype 005 completion authorization under Decision 43, preserving its local API permissions question, numbering and history; documented separate evidence and non-retroactive bracketing. | Execution authorized within stated bounds; Prototype 005 acceptance Pending; local API permissions Pending |
+| 2026-11-16 | Recorded Chris's subsequent formal Prototype 005 technical acceptance with documented limitations and a separate publication-readiness review; retained all earlier authorization history. | Prototype 005 Accepted; publication not authorized; local API permissions Pending |
 
 ## Next steps
 
