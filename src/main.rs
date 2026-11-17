@@ -1,5 +1,5 @@
 use siliconwatch::hwmon::{self, Snapshot, Status};
-use siliconwatch::sampling;
+use siliconwatch::{daemon, sampling};
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, Write};
@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "Usage: siliconwatch sensors [--json] [--hwmon-root PATH]
        siliconwatch sample --count N --interval-ms M [--json-lines] [--hwmon-root PATH]
+       siliconwatch daemon --interval-ms M --stale-after-ms M [--hwmon-root PATH]
        siliconwatch --help
        siliconwatch --version
 
@@ -22,7 +23,15 @@ sample options:
 
 Sampling completes with exit 0 even when attempts report recoverable errors.
 Output failures (including broken pipes) stop sampling with exit 1.
-Interruptions can leave an incomplete stream; no hard runtime deadline is promised.";
+Interruptions can leave an incomplete stream; no hard runtime deadline is promised.
+
+daemon options:
+--interval-ms M    Required foreground acquisition interval, 100-60000 milliseconds.
+--stale-after-ms M Required positive observation-age budget in milliseconds.
+
+Daemon runs in the foreground; SIGINT/SIGTERM request cooperative shutdown.
+It writes lifecycle notices to stderr, uses no stdout telemetry, and requires no root.
+Blocked drivers or output can delay shutdown; no forced shutdown is performed.";
 
 enum Command {
     Sensors {
@@ -34,6 +43,10 @@ enum Command {
         root: PathBuf,
         options: sampling::Options,
     },
+    Daemon {
+        root: PathBuf,
+        options: daemon::Options,
+    },
     Help,
     Version,
 }
@@ -41,12 +54,15 @@ enum Command {
 fn parse_args(mut args: impl Iterator<Item = OsString>) -> Result<Command, String> {
     let first = args
         .next()
-        .ok_or("expected the sensors or sample command")?;
+        .ok_or("expected the sensors, sample or daemon command")?;
     if first == "--help" || first == "-h" {
         return Ok(Command::Help);
     }
     if first == "--version" {
         return Ok(Command::Version);
+    }
+    if first == "daemon" {
+        return parse_daemon_args(args);
     }
     let sampling = first == "sample";
     if first != "sensors" && !sampling {
@@ -109,6 +125,47 @@ fn parse_args(mut args: impl Iterator<Item = OsString>) -> Result<Command, Strin
     } else {
         Ok(Command::Sensors { json, root })
     }
+}
+
+fn parse_daemon_args(mut args: impl Iterator<Item = OsString>) -> Result<Command, String> {
+    let mut interval_ms = None;
+    let mut stale_after_ms = None;
+    let mut root = None;
+    while let Some(arg) = args.next() {
+        match arg.to_str() {
+            Some("--interval-ms") => {
+                if interval_ms.is_some() {
+                    return Err("duplicate --interval-ms".into());
+                }
+                interval_ms = Some(decimal_argument(args.next(), "--interval-ms")?);
+            }
+            Some("--stale-after-ms") => {
+                if stale_after_ms.is_some() {
+                    return Err("duplicate --stale-after-ms".into());
+                }
+                stale_after_ms = Some(decimal_argument(args.next(), "--stale-after-ms")?);
+            }
+            Some("--hwmon-root") => {
+                if root.is_some() {
+                    return Err("duplicate --hwmon-root".into());
+                }
+                let path = args.next().ok_or("--hwmon-root requires a path")?;
+                if path.is_empty() || path.to_str().is_some_and(|s| s.starts_with("--")) {
+                    return Err("--hwmon-root requires a path".into());
+                }
+                root = Some(PathBuf::from(path));
+            }
+            Some("--help" | "-h") => return Ok(Command::Help),
+            _ => return Err(format!("unknown option: {}", arg.to_string_lossy())),
+        }
+    }
+    Ok(Command::Daemon {
+        root: root.unwrap_or_else(|| PathBuf::from("/sys/class/hwmon")),
+        options: daemon::Options::new(
+            interval_ms.ok_or("daemon requires --interval-ms")?,
+            stale_after_ms.ok_or("daemon requires --stale-after-ms")?,
+        )?,
+    })
 }
 
 fn decimal_argument(value: Option<OsString>, option: &str) -> Result<u64, String> {
@@ -313,22 +370,51 @@ fn write_sample_table(out: &mut impl Write, record: sampling::Record) -> io::Res
 }
 
 fn run() -> io::Result<ExitCode> {
-    let command = match parse_args(env::args_os().skip(1)) {
+    let mut args = env::args_os().skip(1).peekable();
+    let daemon_requested = args.peek().is_some_and(|arg| arg == "daemon");
+    let command = match parse_args(args) {
         Ok(command) => command,
         Err(error) => {
+            if daemon_requested {
+                let reported = writeln!(
+                    io::stderr().lock(),
+                    "siliconwatch: {}\n\n{USAGE}",
+                    terminal_text(&error)
+                );
+                return Ok(if reported.is_ok() {
+                    ExitCode::from(2)
+                } else {
+                    ExitCode::FAILURE
+                });
+            }
             eprintln!("siliconwatch: {}\n\n{USAGE}", terminal_text(&error));
             return Ok(ExitCode::from(2));
         }
     };
-    let mut out = io::stdout().lock();
     match command {
-        Command::Help => writeln!(out, "{USAGE}")?,
-        Command::Version => writeln!(out, "siliconwatch {}", env!("CARGO_PKG_VERSION"))?,
+        Command::Daemon { root, options } => {
+            if let Err(error) = daemon::run(&root, options) {
+                // Daemon reporting failures must never use the one-shot broken-pipe exception.
+                let _ = writeln!(
+                    io::stderr().lock(),
+                    "siliconwatch: {}",
+                    terminal_text(&error.to_string())
+                );
+                return Ok(ExitCode::FAILURE);
+            }
+        }
+        Command::Help => writeln!(io::stdout().lock(), "{USAGE}")?,
+        Command::Version => writeln!(
+            io::stdout().lock(),
+            "siliconwatch {}",
+            env!("CARGO_PKG_VERSION")
+        )?,
         Command::Sample {
             json_lines,
             root,
             options,
         } => {
+            let mut out = io::stdout().lock();
             let result = sampling::run(&root, options, |record| {
                 if json_lines {
                     sampling::write_json_line(record, &mut out)
@@ -342,37 +428,45 @@ fn run() -> io::Result<ExitCode> {
                 return Ok(ExitCode::FAILURE);
             }
         }
-        Command::Sensors { json, root } => match hwmon::scan(&root) {
-            Ok(snapshot) if json => match serde_json::to_vec_pretty(&snapshot) {
-                // Buffer serialization so an unencodable path cannot leave partial JSON.
-                Ok(bytes) => {
-                    out.write_all(&bytes)?;
-                    writeln!(out)?;
-                }
+        Command::Sensors { json, root } => {
+            let mut out = io::stdout().lock();
+            match hwmon::scan(&root) {
+                Ok(snapshot) if json => match serde_json::to_vec_pretty(&snapshot) {
+                    // Buffer serialization so an unencodable path cannot leave partial JSON.
+                    Ok(bytes) => {
+                        out.write_all(&bytes)?;
+                        writeln!(out)?;
+                    }
+                    Err(error) => {
+                        write_json_error(
+                            &mut out,
+                            &root,
+                            "serialization_error",
+                            &error.to_string(),
+                        )?;
+                        return Ok(ExitCode::FAILURE);
+                    }
+                },
+                Ok(snapshot) => write_table(&mut out, &snapshot)?,
                 Err(error) => {
-                    write_json_error(&mut out, &root, "serialization_error", &error.to_string())?;
+                    if json {
+                        write_json_error(
+                            &mut out,
+                            &root,
+                            &format!("{:?}", error.kind()),
+                            &error.to_string(),
+                        )?;
+                    } else {
+                        eprintln!(
+                            "siliconwatch: cannot scan {}: {}",
+                            terminal_text(&root.to_string_lossy()),
+                            terminal_text(&error.to_string())
+                        );
+                    }
                     return Ok(ExitCode::FAILURE);
                 }
-            },
-            Ok(snapshot) => write_table(&mut out, &snapshot)?,
-            Err(error) => {
-                if json {
-                    write_json_error(
-                        &mut out,
-                        &root,
-                        &format!("{:?}", error.kind()),
-                        &error.to_string(),
-                    )?;
-                } else {
-                    eprintln!(
-                        "siliconwatch: cannot scan {}: {}",
-                        terminal_text(&root.to_string_lossy()),
-                        terminal_text(&error.to_string())
-                    );
-                }
-                return Ok(ExitCode::FAILURE);
             }
-        },
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -403,6 +497,27 @@ mod tests {
                             .map(OsString::from)
                     ),
                     Ok(Command::Sample { .. })
+                ));
+            }
+        }
+    }
+    #[test]
+    fn daemon_accepts_numeric_bounds_without_executing_them() {
+        for interval in ["100", "60000"] {
+            for freshness in ["1", "18446744073709551615"] {
+                assert!(matches!(
+                    parse_args(
+                        [
+                            "daemon",
+                            "--interval-ms",
+                            interval,
+                            "--stale-after-ms",
+                            freshness
+                        ]
+                        .into_iter()
+                        .map(OsString::from)
+                    ),
+                    Ok(Command::Daemon { .. })
                 ));
             }
         }

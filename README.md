@@ -10,7 +10,7 @@ SiliconWatch is an open-source project for native Linux hardware monitoring and 
 
 Understand what your hardware is doing, spot problems early, and keep a record of what happened when a protection rule was triggered.
 
-**Status: Alpha 1, Prototype 003.** A read-only Rust CLI discovers Linux `hwmon` sensors, reports best-effort source identities, and supports bounded foreground sampling with explicit timing and recoverable errors. This is experimental monitoring; the broader capabilities below remain planned.
+**Status: Alpha 1, Prototype 008 (local implementation).** A read-only Rust CLI discovers Linux `hwmon` sensors, reports best-effort source identities, supports bounded foreground sampling, and runs a foreground acquisition service with a shared snapshot cache and cooperative shutdown. This is experimental monitoring; the broader capabilities below remain planned.
 
 ## Try the prototype
 
@@ -21,9 +21,12 @@ cargo run -- sensors
 cargo run -- sensors --json
 cargo run -- sample --count 5 --interval-ms 1000
 cargo run -- sample --count 5 --interval-ms 1000 --json-lines
+cargo run -- daemon --interval-ms 1000 --stale-after-ms 3000
 ```
 
 Run as your normal user. See [Prototype 003 sampling, output, and limitations](docs/milestones/003-bounded-foreground-sampling.md) and [Prototype 002 identity rules](docs/milestones/002-stable-sensor-identity.md). Sampling exit 0 means all attempts completed, even if individual attempts report errors; inspect each output record. The prototype does not control hardware or perform protective actions.
+
+The foreground `daemon` command writes lifecycle notices to stderr and stops cooperatively on Ctrl-C or SIGTERM. It has no external telemetry API or service installer. A blocked scan or output stream can delay shutdown. See [Prototype 008 lifecycle, freshness, and exit behavior](docs/milestones/008-headless-daemon-lifecycle.md).
 
 ## What we're building
 
