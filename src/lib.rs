@@ -3,3 +3,4 @@
 pub mod hwmon;
 pub mod identity;
 pub mod sampling;
+pub mod snapshot_cache;
