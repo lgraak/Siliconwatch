@@ -81,15 +81,50 @@ def write_private(path, data):
         stream.write(data)
 
 
+def reporting_error(document, sink, error):
+    # One sanitized error per fixed sink; failed progress/report sinks are not retried.
+    stage = ('finalization' if 'alias_cleanup' in document else
+             'setup' if document['status'] == 'setup' else 'execution')
+    document.setdefault('reporting_errors', {}).setdefault(sink,
+        {'stage': stage, 'type': type(error).__name__, 'errno': getattr(error, 'errno', None)})
+    if document['status'] in ('setup', 'running', 'complete', 'smoke_complete'):
+        document['status'] = 'stopped_error'
+
+
+def promote_final_status(document, status):
+    previous = document['status']
+    if previous != status and previous not in ('setup', 'running', 'complete', 'smoke_complete'):
+        document.setdefault('prior_stop_reason', previous)
+    document['status'] = status
+
+
+def save_json(document, output):
+    try:
+        data = (json.dumps(document, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode()
+        if len(data) > RESULT_BYTES:
+            raise ProtocolError('result metadata limit exceeded')
+        pending = output / 'results.pending'
+        write_private(pending, data)
+        pending.replace(output / 'results.json')
+    except (OSError, ValueError, TypeError) as error:
+        reporting_error(document, 'results', error)
+        raise
+
+
 def save(document, output):
-    data = (json.dumps(document, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode()
-    report = render_report(document).encode()
-    if len(data) > RESULT_BYTES or len(report) > MIB:
-        raise ProtocolError('result metadata limit exceeded')
-    pending = output / 'results.pending'
-    write_private(pending, data)
-    pending.replace(output / 'results.json')
-    write_private(output / 'report.md', report)
+    # A derived report must never gate the authoritative checkpoint.
+    save_json(document, output)
+    if 'report' not in document.get('reporting_errors', {}):
+        try:
+            report = render_report(document).encode()
+            if len(report) > MIB:
+                raise ProtocolError('report metadata limit exceeded')
+            pending = output / 'report.pending'
+            write_private(pending, report)
+            pending.replace(output / 'report.md')
+        except (OSError, ValueError, TypeError) as error:
+            reporting_error(document, 'report', error)
+            save_json(document, output)  # Record the report failure, never retry its sink.
 
 
 def load_result(path):
@@ -174,16 +209,41 @@ def execute(args):
     aliases = output / 'aliases'
     aliases.mkdir(mode=0o700)
 
+    def emit(message, sink):
+        if sink in document.get('reporting_errors', {}):
+            return False
+        try:
+            if sink == 'execution_log':
+                line = f'{time.monotonic() - begin:.6f}s {message}\n'.encode()
+                fd = os.open(output / 'execution.log', os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, 'ab') as stream:
+                    if os.fstat(stream.fileno()).st_size + len(line) > 64 * 1024:
+                        raise ProtocolError('execution log limit exceeded')
+                    stream.write(line)
+            elif sink == 'stderr':
+                print(message, file=sys.stderr, flush=True)
+            else:
+                print(message, flush=True)
+        except (OSError, ValueError) as error:
+            reporting_error(document, sink, error)
+            return False
+        return True
+
     def announce(message):
-        if args.completion_block:
-            line = f'{time.monotonic() - begin:.6f}s {message}\n'.encode()
-            # The finite protocol emits only short, fixed-vocabulary messages.
-            fd = os.open(output / 'execution.log', os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, 'ab') as stream:
-                if os.fstat(stream.fileno()).st_size + len(line) > 64 * 1024:
-                    raise ProtocolError('execution log limit exceeded')
-                stream.write(line)
-        print(message, flush=True)
+        logged = emit(message, 'execution_log') if args.completion_block else True
+        printed = emit(message, 'stdout')
+        return logged and printed
+
+    def report_errors():
+        if document.get('reporting_errors'):
+            message = ('Provider diagnostic reporting failure: '
+                       + ', '.join(sorted(document['reporting_errors']))
+                       + '; final state may be unavailable. Check results.json.')
+            for sink in ('stderr', 'stdout', 'execution_log'):
+                if sink == 'execution_log' and not args.completion_block:
+                    continue
+                if emit(message, sink):
+                    break
 
     document = {'schema_version': 1, 'kind': 'siliconwatch.provider-latency', 'status': 'setup',
                 'configuration': {'cases': [], 'suite_timeout_seconds': suite_seconds,
@@ -226,6 +286,8 @@ def execute(args):
         by_token = {r['token']: r for r in selected}
         primary_started = False
         for index, case in enumerate(cases):
+            if document['status'] != 'running':
+                break
             if interrupt.is_set():
                 document['status'] = 'interrupted'
                 break
@@ -237,7 +299,8 @@ def execute(args):
                     document['status'] = 'projection_exceeds_time_budget'
                     break
                 primary_started = True
-                announce('SMOKE PASSED; bounded primary protocol starting')
+                if not announce('SMOKE PASSED; bounded primary protocol starting'):
+                    break
             wait_started = time.monotonic()
             if index:
                 if wait_started - begin + SETTLE_SECONDS + case['timeout_seconds'] + final_reserve > suite_seconds:
@@ -269,8 +332,14 @@ def execute(args):
             context = alias_root(aliases, registration) if registration is not None else nullcontext(root)
             document['in_progress'] = case['id']
             document['actual_suite_elapsed_seconds'] = time.monotonic() - begin
-            save(document, output)
-            announce(f"START {index+1}/{len(cases)} {case['id']}")
+            try:
+                save(document, output)
+            except (OSError, ValueError, TypeError):
+                document['in_progress'] = None  # Checkpoint failed before any child launch.
+                raise
+            if document['status'] != 'running' or not announce(f"START {index+1}/{len(cases)} {case['id']}"):
+                document['in_progress'] = None  # This child was never launched.
+                break
             resource = None
             alias_error = None
             try:
@@ -323,7 +392,7 @@ def execute(args):
             elif fingerprint(enumerate_registrations(root)) != source_fingerprint:
                 document['status'] = 'inventory_changed'
             if interrupt.is_set():
-                document['status'] = 'interrupted'
+                promote_final_status(document, 'interrupted')
             document['actual_suite_elapsed_seconds'] = time.monotonic() - begin
             save(document, output)
             announce(f"END {case['id']} {resource['termination']} records={actual} valid={complete}")
@@ -331,8 +400,9 @@ def execute(args):
                 break
         else:
             document['status'] = 'smoke_complete' if args.smoke_only else 'complete'
-    except (OSError, ValueError, SelectionError) as error:
-        document['status'] = 'stopped_error'
+    except (OSError, ValueError, TypeError, SelectionError) as error:
+        if document['status'] in ('setup', 'running', 'complete', 'smoke_complete'):
+            document['status'] = 'stopped_error'
         document['error'] = {'type': type(error).__name__, 'errno': getattr(error, 'errno', None)}
         if isinstance(error, (SelectionError, ProtocolError, ParseError)):
             document['error']['code'] = str(error)
@@ -353,25 +423,37 @@ def execute(args):
             if received_signals:
                 announce('Received signals: ' + ', '.join(signal.Signals(s).name for s in sorted(received_signals)))
             if interrupt.is_set():
-                document['status'] = 'interrupted'
+                promote_final_status(document, 'interrupted')
             document['actual_suite_elapsed_seconds'] = time.monotonic() - begin
             if document['actual_suite_elapsed_seconds'] > suite_seconds:
-                document['status'] = 'suite_timeout'
-            save(document, output)
-            # A signal during cleanup or the final write must not leave a success record.
-            elapsed_after_save = time.monotonic() - begin
-            if elapsed_after_save > suite_seconds:
-                document['status'] = 'suite_timeout'
-                document['actual_suite_elapsed_seconds'] = elapsed_after_save
+                promote_final_status(document, 'suite_timeout')
+            report_errors()
+            try:
+                notified_errors = dict(document.get('reporting_errors', {}))
                 save(document, output)
-            elif interrupt.is_set() and document['status'] not in ('interrupted', 'suite_timeout'):
-                document['status'] = 'interrupted'
-                document['actual_suite_elapsed_seconds'] = elapsed_after_save
-                save(document, output)
+                # Output failure must not hide an interrupt/deadline during final writes.
+                saved_status = document['status']
+                saved_errors = dict(document.get('reporting_errors', {}))
+                if saved_errors != notified_errors:
+                    report_errors()
+                elapsed_after_save = time.monotonic() - begin
+                if elapsed_after_save > suite_seconds:
+                    promote_final_status(document, 'suite_timeout')
+                    document['actual_suite_elapsed_seconds'] = elapsed_after_save
+                elif interrupt.is_set() and document['status'] not in ('interrupted', 'suite_timeout'):
+                    promote_final_status(document, 'interrupted')
+                    document['actual_suite_elapsed_seconds'] = elapsed_after_save
+                if (document['status'] != saved_status
+                        or document.get('reporting_errors', {}) != saved_errors):
+                    save(document, output)  # One bounded corrective save, never a retry loop.
+            except (OSError, ValueError, TypeError) as error:
+                reporting_error(document, 'results', error)
+                report_errors()  # Remaining channels only; never claim this error was persisted.
         finally:
             for sig, previous in previous_handlers.items():
                 signal.signal(sig, previous)
-    return 0 if document['status'] in ('complete', 'smoke_complete') else 1
+    return 0 if (document['status'] in ('complete', 'smoke_complete')
+                 and not document.get('reporting_errors')) else 1
 
 
 def arguments(argv=None):

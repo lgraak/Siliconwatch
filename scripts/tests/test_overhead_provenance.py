@@ -82,8 +82,11 @@ class ProvenanceTests(unittest.TestCase):
              patch.object(provenance, "inventory", return_value=[]), \
              patch.object(provenance, "_power", return_value=[]), \
              patch.object(provenance, "_cpu_quota", return_value={"status": "unavailable"}), \
+             patch.object(Path, "glob", return_value=iter(())) as governor_paths, \
              patch.object(provenance.platform, "node", side_effect=AssertionError("hostname read")):
             result = provenance.collect_environment(binary, self.root, self.root)
+        governor_paths.assert_called_once_with("cpufreq/policy*/scaling_governor")
+        self.assertEqual(result["cpu"]["observed_governors"], [])
         self.assertIsNone(result["memory_total_kib"])
         self.assertIsNone(result["git_revision"])
         self.assertIsNone(result["installed_rust_1_85"])

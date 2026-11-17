@@ -317,4 +317,9 @@ def render_report(document):
         errors = run.get("parsed", {}).get("errors", []) + run.get("coverage", {}).get("errors", [])
         if errors:
             lines.append(f"- {_display(run.get('case', {}).get('id'))}: " + "; ".join(map(_display, errors)))
+    if document.get("prior_stop_reason"):
+        lines += ["", f"Earlier stop reason: **{_display(document['prior_stop_reason'])}**."]
+    if document.get("reporting_errors"):
+        lines += ["", "## Reporting failures", "", "```json",
+                  json.dumps(document["reporting_errors"], sort_keys=True, indent=2, ensure_ascii=True), "```"]
     return "\n".join(lines).rstrip() + "\n"
