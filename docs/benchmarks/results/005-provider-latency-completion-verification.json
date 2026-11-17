@@ -1,0 +1,172 @@
+{
+  "artifacts": {
+    "completion_archive_sha256": "faaf4b0e62d843ca28f75279b622b1e017df356f8df22620eb3042c9182adf33",
+    "completion_raw_bytes": 10053219,
+    "completion_report_sha256": "8877e6c003bb3734009f22b830ed2c57e1b2d8a342c54350318489a65eeafff7",
+    "completion_results_sha256": "b3a0f05e5240c8dac5cd6e87d3b51955ca09de57d5faecd0571ab6f9001f34f5"
+  },
+  "assessment": {
+    "historical_503ms_cause": "not established",
+    "local_api_policy": "pending",
+    "milestone_acceptance": "pending Chris review",
+    "technical_completion": "approved completion criteria satisfied; recommend acceptance review"
+  },
+  "execution_result": {
+    "alias_cleanup": "complete",
+    "enclosing_policy": "GNU timeout sends TERM before590s from preflight start, KILL after5s; no detached job; abrupt enclosing-tool loss remains outside cleanup guarantees",
+    "final_elapsed_scope": "harness timer; preflight recorded separately; no reconstruction of earlier interrupted suite duration",
+    "harness_elapsed_seconds": 398.4072388730019,
+    "harness_status": "complete",
+    "observed_enclosing_exit_code": 0,
+    "owned_measurement_processes_remaining": 0,
+    "preflight_elapsed_seconds": 0.0740594870003406,
+    "retries": 0,
+    "session_limit_seconds": 600
+  },
+  "kind": "siliconwatch.provider-latency-completion-verification",
+  "preflight": {
+    "binary_sha256": "130ea26f6cc27aae1378c63b373e2f88c22d3faadce87d547fbec836949d98d8",
+    "case_count": 13,
+    "combined_limit_bytes": 268435456,
+    "foreground_policy": "GNU timeout sends TERM before590s from preflight start, KILL after5s; no detached job; abrupt enclosing-tool loss remains outside cleanup guarantees",
+    "free_bytes": 1745853161472,
+    "gates": {
+      "conflicting_process_count": 0,
+      "kernel_and_cpu_unchanged": true,
+      "limits_and_projections_passed": true,
+      "original_evidence_files_unchanged": 78,
+      "provider_parent_channel_evidence_unchanged": true
+    },
+    "hardware_measurements_started": null,
+    "harness_sha256": {
+      "measure_overhead.py": "5c3b17b9926bc32f62d0135e0b16e549e7c85173d18f7bc095c7770164d7bd69",
+      "measure_provider_latency.py": "fde72d82906c1d35d84176681e7f51b80164047ad57ed57ae11f3d96079a458b",
+      "overhead_process.py": "57f3c246fe100efc06fecafe0f56cd7ff1e199a60f2b910899c33dc6faa6de47",
+      "overhead_provenance.py": "738ce679327241a6467b1945710d16a4d068ce48e83a222ff7c07d3fa36174a4",
+      "overhead_results.py": "227326a5ecc786cea838d5db78eacd68f7ab26e10fb56fa0c9cf85a355b4029e",
+      "provider_results.py": "174d92c89681c4a3a02d12a5926dc53c26fc3c4a5780a6792359646bf5ed1e6d",
+      "provider_selection.py": "6d58d5a01a2e6bf14c3ecee8ada1724ccd1ee81db251630c835d03299f07e058"
+    },
+    "inventory": [
+      {
+        "channel_count": 1,
+        "device_link_status": "ok",
+        "issues": [],
+        "provider": "acpitz",
+        "status": "ok",
+        "token": "r001"
+      },
+      {
+        "channel_count": 3,
+        "device_link_status": "ok",
+        "issues": [],
+        "provider": "nvme",
+        "status": "ok",
+        "token": "r002"
+      },
+      {
+        "channel_count": 5,
+        "device_link_status": "ok",
+        "issues": [],
+        "provider": "amdgpu",
+        "status": "ok",
+        "token": "r003"
+      },
+      {
+        "channel_count": 1,
+        "device_link_status": "ok",
+        "issues": [],
+        "provider": "k10temp",
+        "status": "ok",
+        "token": "r004"
+      },
+      {
+        "channel_count": 1,
+        "device_link_status": "ok",
+        "issues": [],
+        "provider": "iwlwifi_1",
+        "status": "ok",
+        "token": "r005"
+      },
+      {
+        "channel_count": 0,
+        "device_link_status": "ok",
+        "issues": [],
+        "provider": "hidpp_battery_0",
+        "status": "zero_inputs",
+        "token": "r006"
+      }
+    ],
+    "launch_intent": "one completion-block invocation; actual execution recorded separately",
+    "load_average": [
+      2.0830078125,
+      1.69873046875,
+      1.50830078125
+    ],
+    "logical_cpu_count": 24,
+    "new_evidence_limit_bytes": 134217728,
+    "preflight_elapsed_seconds": 0.0740594870003406,
+    "preserved_evidence_bytes": 31868191,
+    "primary_order": [
+      "full_before",
+      "amdgpu",
+      "k10temp",
+      "iwlwifi_1",
+      "acpitz",
+      "nvme",
+      "full_after"
+    ],
+    "record_cap": 2173,
+    "session_limit_seconds": 600,
+    "status": "passed"
+  },
+  "preservation": {
+    "hash_size_mtime_checks": "all unchanged",
+    "interrupted_prefix_records": 277,
+    "original_checkpoint_sha256": "ce55ff87315da595c7fd31bd567c3861fdad4d850f3989b04696b866cff8d420",
+    "original_file_count": 78,
+    "unavailable_accounting": "remains null; not reconstructed"
+  },
+  "schema_version": 1,
+  "verification": {
+    "checks": [
+      "case order and bounds",
+      "capture hashes and sizes",
+      "source and binary provenance",
+      "schemas and timestamps",
+      "monotonic timing and freshness",
+      "identities and exact channel coverage",
+      "CPU accounting",
+      "quantiles and thresholds",
+      "tails and neighbors",
+      "completion and cleanup"
+    ],
+    "clippy": "passed both toolchains; warnings denied",
+    "completed_cases": 13,
+    "formatting": "passed both toolchains",
+    "identity_comparisons": 5,
+    "independent_capture_audit": "passed",
+    "primary_records": 2107,
+    "python_tests": {
+      "failed": 0,
+      "passed": 139,
+      "skipped": 0
+    },
+    "release_binary": "preserved; no rebuild invoked",
+    "report_regeneration": "byte-identical",
+    "rust_tests_per_toolchain": {
+      "1.100.0": {
+        "failed": 0,
+        "ignored": 0,
+        "passed": 53
+      },
+      "1.85.0": {
+        "failed": 0,
+        "ignored": 0,
+        "passed": 53
+      }
+    },
+    "smoke_records": 66,
+    "verified_raw_records": 2173
+  }
+}
