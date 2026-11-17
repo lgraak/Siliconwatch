@@ -233,6 +233,21 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             results.render_report({"schema_version": 2})
 
+    def test_report_exposes_reporting_failures_without_changing_legacy_output(self):
+        document = {"schema_version": 1, "status": "stopped_error", "runs": []}
+        legacy = results.render_report(document)
+        document["reporting_errors"] = {}
+        self.assertEqual(results.render_report(document), legacy)
+        document["reporting_errors"]["stdout"] = {"type": "BrokenPipeError", "errno": 32}
+        report = results.render_report(document)
+        self.assertIn('"type": "BrokenPipeError"', report)
+        self.assertIn('"errno": 32', report)
+        self.assertIn('"stdout"', report)
+        self.assertEqual(report.split("\n## Reporting failures")[0].rstrip(), legacy.rstrip())
+        self.assertEqual(report, results.render_report(json.loads(json.dumps(document))))
+        document["prior_stop_reason"] = "inventory_changed"
+        self.assertIn("Earlier stop reason: **inventory_changed**.", results.render_report(document))
+
     def test_report_reads_recorded_global_and_per_case_bounds(self):
         smoke = {"id": "001-smoke", "count": 11, "interval_ms": 100,
                  "warmup_seconds": 0, "timeout_seconds": 5, "output_limit_bytes": 1024**2}

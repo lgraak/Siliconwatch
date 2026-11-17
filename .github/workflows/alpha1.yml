@@ -28,6 +28,63 @@ jobs:
         run: cargo clippy --locked -- -D warnings
       - name: Tests
         run: cargo test --locked
+      - name: Build the fixture executable
+        run: cargo +1.85.0 build --release --locked --target-dir target/provider-latency
+      - name: Python diagnostic fixtures
+        timeout-minutes: 5
+        run: |
+          test -x target/provider-latency/release/siliconwatch
+          python3 -B - <<'PY'
+          import sys
+          import unittest
+
+          print(f"Python: {sys.version}", flush=True)
+          if sys.version_info < (3, 11):
+              raise SystemExit("Python 3.11 or newer is required")
+
+          suite = unittest.defaultTestLoader.discover("scripts/tests", pattern="test_*.py")
+
+          def test_ids(tests):
+              for test in tests:
+                  if isinstance(test, unittest.TestSuite):
+                      yield from test_ids(test)
+                  else:
+                      yield test.id()
+
+          identifiers = set(test_ids(suite))
+          required_modules = {
+              "test_measure_overhead",
+              "test_measure_provider_latency",
+              "test_overhead_orchestration",
+              "test_overhead_process",
+              "test_overhead_provenance",
+              "test_overhead_results",
+              "test_provider_results",
+              "test_provider_selection",
+          }
+          required_cli_tests = {
+              "test_provider_selection.CliAliasTests." + name
+              for name in (
+                  "test_fixture_alias_preserves_raw_values_order_errors_and_identity",
+                  "test_isolation_exposes_collision_context_difference_without_rewriting_candidates",
+                  "test_root_layout_can_change_identity_meaning_and_must_be_reported",
+                  "test_existing_table_and_sampling_json_lines_use_unchanged_contract",
+              )
+          }
+          missing_modules = required_modules - {name.split(".")[0] for name in identifiers}
+          missing_cli_tests = required_cli_tests - identifiers
+          if suite.countTestCases() < 139 or missing_modules or missing_cli_tests:
+              raise SystemExit(
+                  f"Incomplete discovery: {suite.countTestCases()} tests; "
+                  f"missing modules={sorted(missing_modules)}; "
+                  f"missing CLI tests={sorted(missing_cli_tests)}"
+              )
+
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if result.skipped:
+              print(f"CI rejects {len(result.skipped)} skipped test(s)", file=sys.stderr)
+          raise SystemExit(0 if result.wasSuccessful() and not result.skipped else 1)
+          PY
 
   dco:
     name: DCO signoffs

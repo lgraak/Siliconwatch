@@ -1,6 +1,7 @@
 """Protocol orchestration fixtures; fake timing/children, never real hardware."""
 
 import contextlib
+import errno
 import io
 import itertools
 import json
@@ -364,12 +365,385 @@ class ProtocolTests(unittest.TestCase):
                     self.assertTrue(callable(signal.getsignal(sig)))
                 raise OSError('fixture finalization write failed')
             return real_save(document, output)
-        with self.assertRaises(OSError), patch.object(harness, 'save', failed_save):
-            self.execute('--smoke-only')
+        diagnostic = io.StringIO()
+        with patch.object(harness, 'save', failed_save), contextlib.redirect_stderr(diagnostic):
+            code, document = self.execute('--smoke-only')
+        self.assertEqual(code, 1)
         self.assertEqual(observed, ['save'])
+        self.assertEqual(document['status'], 'running')  # Last committed checkpoint, not a final outcome.
+        self.assertEqual(len(document['runs']), 3)
+        self.assertTrue(diagnostic.getvalue())
+        self.assertNotIn('fixture finalization write failed', diagnostic.getvalue())
         self.assertFalse((self.output / 'aliases').exists())
         for sig, before in previous.items():
             self.assertIs(signal.getsignal(sig), before)
+
+    def test_progress_stdout_failure_stops_before_any_subsequent_child(self):
+        for prefix, completed in (('START ', 0), ('END ', 1), ('SMOKE PASSED;', 3)):
+            with self.subTest(prefix=prefix):
+                self.output = self.base / f'progress-{completed}'
+                self.event = Event()
+                self.calls.clear()
+                failures = []
+                def broken_progress(*args, **kwargs):
+                    if args and str(args[0]).startswith(prefix):
+                        failures.append(str(args[0]))
+                        raise BrokenPipeError(errno.EPIPE, f'private {self.base}')
+                with patch('builtins.print', side_effect=broken_progress):
+                    code, document = self.execute()
+                self.assertEqual(code, 1)
+                self.assertEqual(len(self.calls), completed)
+                self.assertEqual(len(document['runs']), completed)
+                self.assertEqual(len(failures), 1)
+                self.assertEqual(document['status'], 'stopped_error')
+                self.assertEqual(document['reporting_errors']['stdout'],
+                                 {'stage': 'execution', 'type': 'BrokenPipeError', 'errno': errno.EPIPE})
+                self.assertIsNone(document['in_progress'])
+                self.assertEqual(len(document['not_started']), 15 - completed)
+                self.assertEqual(document['alias_cleanup'], 'complete')
+                self.assertFalse((self.output / 'aliases').exists())
+                self.assertNotIn(str(self.base), json.dumps(document))
+
+    def test_progress_flush_failure_disables_the_failed_sink(self):
+        class BrokenFlush(io.StringIO):
+            flush_calls = 0
+            def flush(self):
+                self.flush_calls += 1
+                raise BrokenPipeError(errno.EPIPE, 'private flush failure')
+        stream = BrokenFlush()
+        code, document = self.execute('--smoke-only', extra=patch.object(sys, 'stdout', stream))
+        self.assertEqual(code, 1)
+        self.assertEqual(stream.flush_calls, 1)
+        self.assertFalse(self.calls)
+        self.assertEqual(document['status'], 'stopped_error')
+        self.assertIn('stdout', document['reporting_errors'])
+        self.assertIsNone(document['in_progress'])
+        self.assertEqual(len(document['not_started']), 3)
+        self.assertNotIn('private flush failure', json.dumps(document))
+
+    def test_final_broken_pipe_preserves_cases_raw_hashes_and_cleanup(self):
+        before = {}
+        failures = []
+        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+        def broken_final(*args, **kwargs):
+            if args and str(args[0]).startswith('Finalizing '):
+                failures.append(str(args[0]))
+                before['runs'] = harness.load_result(self.output)['runs']
+                before['raw'] = {str(path.relative_to(self.output)): harness.binary_hash(path)
+                                 for path in self.output.glob('*/*.raw')}
+                raise BrokenPipeError(errno.EPIPE, f'private {self.base}')
+        with patch('builtins.print', side_effect=broken_final):
+            code, document = self.execute('--smoke-only')
+        self.assertEqual(code, 1)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(document['status'], 'stopped_error')
+        self.assertEqual(document['runs'], before['runs'])
+        self.assertEqual(sum(r['validity']['actual_attempts'] for r in document['runs']), 33)
+        self.assertEqual(len(before['raw']), 6)
+        self.assertEqual(document['reporting_errors']['stdout']['stage'], 'finalization')
+        self.assertEqual(before['raw'], {str(path.relative_to(self.output)): harness.binary_hash(path)
+                                        for path in self.output.glob('*/*.raw')})
+        self.assertEqual(document['alias_cleanup'], 'complete')
+        self.assertFalse((self.output / 'aliases').exists())
+        self.assertIn('stdout', document['reporting_errors'])
+        self.assertNotIn(str(self.base), json.dumps(document))
+        for sig, handler in previous.items():
+            self.assertIs(signal.getsignal(sig), handler)
+
+    def test_execution_log_failure_is_recorded_once_and_prevents_launch(self):
+        self.completion_fixture()
+        real_open = os.open
+        failures = []
+        def denied_log(path, *args, **kwargs):
+            if Path(path).name == 'execution.log':
+                failures.append(path)
+                raise PermissionError(errno.EACCES, f'private {self.base}')
+            return real_open(path, *args, **kwargs)
+        code, document = self.execute('--completion-block', extra=patch.object(os, 'open', denied_log))
+        self.assertEqual(code, 1)
+        self.assertEqual(len(failures), 1)
+        self.assertFalse(self.calls)
+        self.assertEqual(document['status'], 'stopped_error')
+        self.assertEqual(document['reporting_errors']['execution_log'],
+                         {'stage': 'execution', 'type': 'PermissionError', 'errno': errno.EACCES})
+        self.assertEqual(len(document['not_started']), 13)
+        self.assertIsNone(document['in_progress'])
+        self.assertEqual(document['alias_cleanup'], 'complete')
+        self.assertNotIn(str(self.base), json.dumps(document))
+
+    def test_final_output_failure_preserves_stop_reason_and_timeout_precedence(self):
+        for reason in ('incomplete_case', 'interrupted', 'suite_timeout'):
+            with self.subTest(reason=reason):
+                self.output = self.base / f'stop-{reason}'
+                self.event = Event()
+                self.calls.clear()
+                clock = {'now': 100.0}
+                def stopped_child(*args, **kwargs):
+                    resource = self.child(*args, **kwargs)
+                    if reason == 'incomplete_case':
+                        resource.update(termination='timeout', exit_code=None)
+                    elif reason == 'interrupted':
+                        self.event.set()
+                    return resource
+                def broken_final(*args, **kwargs):
+                    if args and str(args[0]).startswith('Finalizing '):
+                        if reason == 'suite_timeout':
+                            clock['now'] = 1601.0
+                            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                        raise BrokenPipeError(errno.EPIPE, 'private secondary failure')
+                with patch('builtins.print', side_effect=broken_final):
+                    code, document = self.execute('--smoke-only', child=stopped_child,
+                        extra=patch.object(harness.time, 'monotonic', side_effect=lambda: clock['now']))
+                self.assertEqual(code, 1)
+                self.assertEqual(document['status'], reason)
+                self.assertIn('stdout', document['reporting_errors'])
+                self.assertEqual(document['alias_cleanup'], 'complete')
+                self.assertEqual(len(self.calls), 3 if reason == 'suite_timeout' else 1)
+                self.assertNotIn('private secondary failure', json.dumps(document))
+
+    def test_inventory_stop_reason_survives_final_interrupt_or_deadline(self):
+        for final_status in ('interrupted', 'suite_timeout'):
+            with self.subTest(final_status=final_status):
+                self.output = self.base / f'inventory-{final_status}'
+                self.event = Event()
+                self.calls.clear()
+                clock = {'now': 100.0}
+                changed = {'inventory': False}
+                real_fingerprint = harness.fingerprint
+                def fingerprint(registrations):
+                    original = real_fingerprint(registrations)
+                    return original + '-changed' if changed['inventory'] else original
+                def child_then_change(*args, **kwargs):
+                    resource = self.child(*args, **kwargs)
+                    changed['inventory'] = True
+                    return resource
+                def final_event(*args, **kwargs):
+                    if args and str(args[0]).startswith('Finalizing '):
+                        if final_status == 'interrupted':
+                            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                        else:
+                            clock['now'] = 1601.0
+                with patch.object(harness, 'fingerprint', fingerprint), \
+                        patch('builtins.print', side_effect=final_event):
+                    code, document = self.execute('--smoke-only', child=child_then_change,
+                        extra=patch.object(harness.time, 'monotonic', side_effect=lambda: clock['now']))
+                self.assertEqual(code, 1)
+                self.assertEqual(document['status'], final_status)
+                self.assertEqual(document['prior_stop_reason'], 'inventory_changed')
+                self.assertEqual(len(self.calls), 1)
+                self.assertEqual(len(document['runs']), 1)
+                self.assertTrue(document['runs'][0]['validity']['complete'])
+                self.assertEqual(document['runs'][0]['validity']['actual_attempts'], 11)
+                self.assertEqual(len(document['not_started']), 2)
+                self.assertIsNone(document['in_progress'])
+                self.assertEqual(document['alias_cleanup'], 'complete')
+
+    def test_prelaunch_checkpoint_failure_keeps_case_unstarted_after_final_save(self):
+        real_save = harness.save
+        failed = []
+        final_saved = []
+        def transient_checkpoint_failure(document, output):
+            if document['in_progress'] is not None and 'alias_cleanup' not in document:
+                failed.append(document['in_progress'])
+                raise OSError(errno.EIO, 'private prelaunch checkpoint failure')
+            result = real_save(document, output)
+            if 'alias_cleanup' in document:
+                final_saved.append(document['status'])
+            return result
+        with patch.object(harness, 'save', transient_checkpoint_failure):
+            code, document = self.execute('--smoke-only')
+        self.assertEqual(code, 1)
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(final_saved, ['stopped_error'])
+        self.assertFalse(self.calls)
+        self.assertEqual(document['status'], 'stopped_error')
+        self.assertIsNone(document['in_progress'])
+        self.assertFalse(document['runs'])
+        self.assertEqual(document['not_started'],
+                         [case['id'] for case in document['configuration']['cases']])
+        self.assertEqual(len(document['not_started']), 3)
+        self.assertEqual(document['retained_raw_bytes'], 0)
+        self.assertFalse(list(self.output.glob('*/*.raw')))
+        self.assertEqual(document['alias_cleanup'], 'complete')
+        self.assertNotIn('private prelaunch', json.dumps(document))
+
+    def test_cleanup_failure_and_broken_output_preserve_unexpected_contents(self):
+        real_rmdir = Path.rmdir
+        marker = self.output / 'aliases' / 'unexpected'
+        def unexpected_contents(path):
+            if path == self.output / 'aliases':
+                marker.write_text('retain fixture evidence')
+            return real_rmdir(path)
+        def broken_final(*args, **kwargs):
+            if args and str(args[0]).startswith('Finalizing '):
+                raise BrokenPipeError(errno.EPIPE, 'private output failure')
+        with patch.object(Path, 'rmdir', unexpected_contents), \
+                patch('builtins.print', side_effect=broken_final):
+            code, document = self.execute('--smoke-only')
+        self.assertEqual(code, 1)
+        self.assertEqual(document['status'], 'cleanup_incomplete')
+        self.assertEqual(document['alias_cleanup'], 'not_empty_or_unavailable')
+        self.assertIn('stdout', document['reporting_errors'])
+        self.assertEqual(marker.read_text(), 'retain fixture evidence')
+        self.assertTrue(all((target / 'temp1_input').read_text() == '42000'
+                            for target in self.targets))
+        self.assertTrue(all(r['validity']['complete'] for r in document['runs']))
+
+    def test_final_json_failures_preserve_last_committed_checkpoint(self):
+        for stage in ('serialization', 'temporary_write', 'replacement'):
+            with self.subTest(stage=stage):
+                self.output = self.base / f'json-{stage}'
+                self.event = Event()
+                self.calls.clear()
+                real_save, real_dumps = harness.save, json.dumps
+                real_write, real_replace = harness.write_private, Path.replace
+                attempted = []
+                before = {}
+                def failed_save(document, output):
+                    if 'alias_cleanup' not in document:
+                        return real_save(document, output)
+                    attempted.append(document)
+                    before.setdefault('json', (output / 'results.json').read_bytes())
+                    def broken_dumps(value, *args, **kwargs):
+                        if value is document:
+                            raise ValueError('private serialization failure')
+                        return real_dumps(value, *args, **kwargs)
+                    def broken_write(path, data):
+                        if path.name == 'results.pending':
+                            raise OSError(errno.ENOSPC, 'private temporary write failure')
+                        return real_write(path, data)
+                    def broken_replace(path, destination):
+                        if path.name == 'results.pending':
+                            raise OSError(errno.EIO, 'private replacement failure')
+                        return real_replace(path, destination)
+                    failures = {'serialization': patch.object(json, 'dumps', broken_dumps),
+                                'temporary_write': patch.object(harness, 'write_private', broken_write),
+                                'replacement': patch.object(Path, 'replace', broken_replace)}
+                    with failures[stage]:
+                        return real_save(document, output)
+                diagnostic = io.StringIO()
+                with patch.object(harness, 'save', failed_save), contextlib.redirect_stderr(diagnostic):
+                    code, document = self.execute('--smoke-only')
+                self.assertEqual(code, 1)
+                self.assertEqual(len(attempted), 1)
+                self.assertEqual((self.output / 'results.json').read_bytes(), before['json'])
+                self.assertEqual(document['status'], 'running')
+                self.assertEqual(len(document['runs']), 3)
+                self.assertTrue(diagnostic.getvalue())
+                self.assertNotIn('private', diagnostic.getvalue())
+                self.assertFalse((self.output / 'aliases').exists())
+
+    def test_derived_report_failures_do_not_prevent_final_json(self):
+        for stage in ('render', 'write'):
+            with self.subTest(stage=stage):
+                self.output = self.base / f'report-{stage}'
+                self.event = Event()
+                self.calls.clear()
+                real_save, real_render = harness.save, harness.render_report
+                real_write = harness.write_private
+                failures = []
+                def failed_report_save(document, output):
+                    if 'alias_cleanup' not in document:
+                        return real_save(document, output)
+                    def broken_render(value):
+                        failures.append('render')
+                        raise ValueError('private report render failure')
+                    def broken_write(path, data):
+                        if path.name in ('report.md', 'report.pending'):
+                            failures.append('write')
+                            raise OSError(errno.ENOSPC, 'private report write failure')
+                        return real_write(path, data)
+                    failure = (patch.object(harness, 'render_report', broken_render) if stage == 'render'
+                               else patch.object(harness, 'write_private', broken_write))
+                    with failure:
+                        return real_save(document, output)
+                with patch.object(harness, 'save', failed_report_save):
+                    code, document = self.execute('--smoke-only')
+                self.assertEqual(code, 1)
+                self.assertEqual(failures, [stage])
+                self.assertEqual(document['status'], 'stopped_error')
+                self.assertIn('report', document['reporting_errors'])
+                self.assertEqual(document['alias_cleanup'], 'complete')
+                self.assertEqual(len(document['runs']), 3)
+                self.assertTrue(all(r['validity']['complete'] for r in document['runs']))
+                self.assertNotIn('private report', json.dumps(document))
+                self.assertTrue(real_render(document))  # A repaired renderer can regenerate the view.
+
+    def test_failed_corrective_save_is_explicit_and_does_not_replace_prior_json(self):
+        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+        real_save = harness.save
+        statuses = []
+        first = {}
+        def interrupted_save(document, output):
+            if 'alias_cleanup' not in document:
+                return real_save(document, output)
+            statuses.append(document['status'])
+            if len(statuses) == 1:
+                result = real_save(document, output)
+                first['json'] = (output / 'results.json').read_bytes()
+                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                return result
+            raise OSError(errno.EIO, 'private corrective write failure')
+        diagnostic = io.StringIO()
+        with patch.object(harness, 'save', interrupted_save), contextlib.redirect_stderr(diagnostic):
+            code, document = self.execute('--smoke-only')
+        self.assertEqual(code, 1)
+        self.assertEqual(statuses, ['smoke_complete', 'interrupted'])
+        self.assertEqual((self.output / 'results.json').read_bytes(), first['json'])
+        self.assertEqual(document['status'], 'smoke_complete')  # Before the observed signal.
+        self.assertTrue(diagnostic.getvalue())
+        self.assertNotIn('private corrective write failure', diagnostic.getvalue())
+        self.assertTrue(self.event.is_set())
+        self.assertFalse((self.output / 'aliases').exists())
+        for sig, handler in previous.items():
+            self.assertIs(signal.getsignal(sig), handler)
+
+    def test_final_json_failure_uses_stdout_when_stderr_is_unavailable(self):
+        real_save = harness.save
+        diagnostics = []
+        failed = {'json': False}
+        def failed_save(document, output):
+            if 'alias_cleanup' in document:
+                failed['json'] = True
+                raise OSError(errno.EIO, 'private final write failure')
+            return real_save(document, output)
+        def broken_stderr(*args, **kwargs):
+            if kwargs.get('file') is sys.stderr:
+                raise BrokenPipeError(errno.EPIPE, 'private stderr failure')
+            if failed['json']:
+                diagnostics.append(' '.join(map(str, args)))
+        with patch.object(harness, 'save', failed_save), patch('builtins.print', side_effect=broken_stderr):
+            code, document = self.execute('--smoke-only')
+        self.assertEqual(code, 1)
+        self.assertTrue(diagnostics)
+        self.assertTrue(all('private' not in message for message in diagnostics))
+        self.assertEqual(document['status'], 'running')
+        self.assertFalse((self.output / 'aliases').exists())
+
+    def test_all_output_channels_failing_still_returns_nonzero_and_restores_handlers(self):
+        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+        real_save = harness.save
+        output_failures = []
+        final = {'started': False}
+        def failed_save(document, output):
+            if 'alias_cleanup' in document:
+                raise OSError(errno.EIO, 'private final write failure')
+            return real_save(document, output)
+        def broken_final_channels(*args, **kwargs):
+            if args and str(args[0]).startswith('Finalizing '):
+                final['started'] = True
+            if final['started']:
+                output_failures.append('stderr' if kwargs.get('file') is sys.stderr else 'stdout')
+                raise BrokenPipeError(errno.EPIPE, 'private unavailable channel')
+        with patch.object(harness, 'save', failed_save), patch('builtins.print', side_effect=broken_final_channels):
+            code, document = self.execute('--smoke-only')
+        self.assertEqual(code, 1)
+        self.assertEqual(document['status'], 'running')
+        self.assertEqual(output_failures.count('stdout'), 1)
+        self.assertEqual(output_failures.count('stderr'), 1)
+        self.assertFalse((self.output / 'aliases').exists())
+        for sig, handler in previous.items():
+            self.assertIs(signal.getsignal(sig), handler)
 
     def test_matrix_bounds_order_and_bracketing(self):
         selected = [{'token': f'r{n:03d}'} for n in range(1, 6)]
