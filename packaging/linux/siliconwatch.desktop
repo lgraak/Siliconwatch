@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=SiliconWatch
+GenericName=Hardware Sensor Monitor
+Comment=View local read-only hardware sensor observations
+Exec=siliconwatch-gui
+TryExec=siliconwatch-gui
+Icon=siliconwatch
+Terminal=false
+Categories=System;Monitor;
+Keywords=Sensors;Temperature;Voltage;Fans;
+StartupNotify=true
