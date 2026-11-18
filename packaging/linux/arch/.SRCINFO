@@ -1,0 +1,27 @@
+pkgbase = siliconwatch
+	pkgdesc = Read-only Linux hardware monitoring with CLI, foreground daemon and native GUI
+	pkgver = 0.1.0alpha.1
+	pkgrel = 1
+	url = https://siliconwatch.cgillett.com/
+	arch = x86_64
+	license = GPL-3.0-only
+	depends = glibc>=2.43
+	depends = libgcc
+	depends = fontconfig
+	depends = ttf-dejavu
+	depends = libglvnd
+	depends = libx11
+	depends = libxcb
+	depends = libxcursor
+	depends = libxi
+	depends = libxrender
+	depends = libxkbcommon
+	depends = libxkbcommon-x11
+	depends = wayland
+	optdepends = dbus: session bus for accessibility and optional StatusNotifier tray integration
+	options = !strip
+	options = !debug
+	source = siliconwatch-0.1.0-alpha.1-arch-payload.tar
+	sha256sums = c888fafd93d278131f2146cacc7683e9f0be577c98d8c36f0409a4951d746d19
+
+pkgname = siliconwatch

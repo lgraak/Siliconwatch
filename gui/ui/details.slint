@@ -1,0 +1,156 @@
+import { Button, ListView, TextEdit, Palette } from "std-widgets.slint";
+import { SensorRow, Colors } from "common.slint";
+
+export component DetailsWindow inherits Window {
+    icon: @image-url("../../assets/branding/siliconwatch-icon.png");
+    title: root.device-title + " — Device Details";
+    preferred-width: 960px;
+    preferred-height: 720px;
+    min-width: 640px;
+    min-height: 480px;
+    in property <[SensorRow]> rows;
+    in-out property <int> selected-row: -1;
+    in property <string> device-title: "Device";
+    in property <string> status;
+    in property <string> stats-note;
+    in property <string> evidence;
+    in property <string> ui-font-family;
+    in property <length> ui-font-size: 14px;
+    in property <length> row-height: 28px;
+    in property <int> theme-index: 0;
+    callback select-row(int);
+    callback close();
+    background: Colors.canvas(root.theme-index);
+    default-font-family: root.ui-font-family;
+    default-font-size: root.ui-font-size;
+    init => { Palette.color-scheme = root.theme-index == 2 ? ColorScheme.light : ColorScheme.dark; }
+    changed theme-index => { Palette.color-scheme = root.theme-index == 2 ? ColorScheme.light : ColorScheme.dark; }
+    property <bool> restore-reading-focus: false;
+    public function focus-readings() { root.restore-reading-focus = true; reading-focus-timer.running = true; }
+    changed ui-font-size => { reading-focus-timer.running = true; }
+    changed width => { reading-focus-timer.running = true; }
+    changed height => { reading-focus-timer.running = true; }
+    reading-focus-timer := Timer {
+        interval: 16ms;
+        running: false;
+        triggered => {
+            if root.rows.length == 0 { self.running = false; }
+            else if readings.viewport-height >= root.rows.length * root.card-height - 1px && readings.visible-height > 0px {
+                self.running = false;
+                if root.restore-reading-focus { reading-focus.focus(); }
+                root.restore-reading-focus = false;
+                ensure-selected-visible();
+            }
+        }
+    }
+
+    function choose(index: int) {
+        if root.rows.length == 0 { return; }
+        root.selected-row = min(root.rows.length - 1, max(0, index));
+        root.select-row(root.selected-row);
+        ensure-selected-visible();
+    }
+    function ensure-selected-visible() {
+        if root.selected-row < 0 { return; }
+        // Category headers and reading cards have a fixed common height for predictable scrolling.
+        if root.selected-row * root.card-height + readings.viewport-y < 0px { readings.viewport-y = -root.selected-row * root.card-height; }
+        if (root.selected-row + 1) * root.card-height + readings.viewport-y > readings.visible-height { readings.viewport-y = readings.visible-height - (root.selected-row + 1) * root.card-height; }
+    }
+    property <length> card-height: max(100px, root.ui-font-size * 5 + 28px);
+    FocusScope {
+        key-pressed(event) => { if event.text == Key.Escape { root.close(); return accept; } return reject; }
+        VerticalLayout {
+            padding: 8px;
+            spacing: 4px;
+            HorizontalLayout {
+                min-height: max(34px, root.ui-font-size * 1.5 + 12px);
+                vertical-stretch: 0;
+                Text { horizontal-stretch: 1; text: root.device-title; color: Colors.text(root.theme-index); font-size: 24px; font-weight: 600; overflow: elide; }
+                Button { min-width: 110px; horizontal-stretch: 0; text: "Close"; clicked => { root.close(); } }
+            }
+            Text { text: root.status; color: Colors.text(root.theme-index); overflow: elide; accessible-label: root.status; }
+            Rectangle {
+                min-height: root.card-height + 4px;
+                vertical-stretch: 2;
+                border-width: reading-focus.has-focus ? 2px : 1px;
+                border-color: reading-focus.has-focus ? Colors.focus(root.theme-index) : Colors.line(root.theme-index);
+                background: Colors.panel(root.theme-index);
+                reading-focus := FocusScope {
+                    x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px;
+                    accessible-role: list;
+                    accessible-label: "Device readings by category";
+                    accessible-item-count: root.rows.length;
+                    accessible-delegate-focus: root.selected-row;
+                    callback navigation(string);
+                    navigation(action) => {
+                        if action == "up" { root.choose(root.selected-row - 1); }
+                        else if action == "down" { root.choose(root.selected-row + 1); }
+                        else if action == "home" { root.choose(0); }
+                        else if action == "end" { root.choose(root.rows.length - 1); }
+                        else if action == "page-up" { root.choose(root.selected-row - max(1, floor(readings.visible-height / root.card-height))); }
+                        else if action == "page-down" { root.choose(root.selected-row + max(1, floor(readings.visible-height / root.card-height))); }
+                        else if action == "escape" { root.close(); }
+                    }
+                    key-pressed(event) => { if event.text == Key.UpArrow { self.navigation("up"); return accept; }
+                        if event.text == Key.DownArrow { self.navigation("down"); return accept; }
+                        if event.text == Key.LeftArrow { self.navigation("left"); return accept; }
+                        if event.text == Key.RightArrow { self.navigation("right"); return accept; }
+                        if event.text == Key.Home { self.navigation("home"); return accept; }
+                        if event.text == Key.End { self.navigation("end"); return accept; }
+                        if event.text == Key.PageUp { self.navigation("page-up"); return accept; }
+                        if event.text == Key.PageDown { self.navigation("page-down"); return accept; }
+                        if event.text == Key.Return { self.navigation("activate"); return accept; }
+                        if event.text == Key.Space { self.navigation("toggle"); return accept; }
+                        if event.text == Key.Escape { self.navigation("escape"); return accept; } return reject; }
+                    readings := ListView {
+                        accessible-role: none;
+
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                        viewport-width: self.visible-width;
+
+                        for row[index] in root.rows: Rectangle {
+                            height: root.card-height;
+                            width: readings.visible-width;
+                            background: index == root.selected-row ? Colors.selection(root.theme-index) : Colors.panel(root.theme-index);
+                            accessible-role: list-item;
+                            accessible-label: row.spoken;
+                            accessible-item-selectable: true;
+                            accessible-item-selected: index == root.selected-row;
+                            accessible-item-index: index;
+                            accessible-action-default => { root.choose(index); }
+                            VerticalLayout {
+                                padding: 8px;
+                                spacing: 3px;
+                                HorizontalLayout {
+                                    Text { text: row.label; color: Colors.text(root.theme-index); font-size: row.group ? root.ui-font-size + 3px : root.ui-font-size; font-weight: 600; overflow: elide; accessible-role: none; }
+                                    Text { text: row.quality; color: Colors.caution(root.theme-index); horizontal-alignment: right; overflow: elide; accessible-role: none; }
+                                }
+                                if !row.group: Text { text: row.current; color: Colors.text(root.theme-index); font-size: root.ui-font-size + 8px; font-weight: 600; vertical-stretch: 0; accessible-role: none; }
+                                if !row.group: Text { text: "Min  " + row.minimum + "    Max  " + row.maximum + "    Avg  " + row.average; color: Colors.secondary(root.theme-index); font-size: max(11px, root.ui-font-size * 0.85); wrap: word-wrap; vertical-stretch: 0; accessible-role: none; }
+                                if !row.group: Text { text: "Valid observations received: " + row.count; color: Colors.secondary(root.theme-index); font-size: max(11px, root.ui-font-size * 0.85); vertical-stretch: 0; overflow: elide; accessible-role: none; }
+                                if row.group: Text { text: "Only readings supplied by the current source are shown."; color: Colors.secondary(root.theme-index); font-size: max(11px, root.ui-font-size * 0.85); wrap: word-wrap; accessible-role: none; }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Colors.line(root.theme-index); }
+                            TouchArea { clicked => { reading-focus.focus(); root.choose(index); } }
+                        }
+
+                    }
+                }
+
+            }
+            Text { text: "Raw values, identity evidence and diagnostics"; color: Colors.text(root.theme-index); font-weight: 600; }
+            TextEdit {
+                min-height: 56px;
+                vertical-stretch: 1;
+                text: root.evidence;
+                read-only: true;
+                accessible-label: "Raw values, identity evidence and diagnostics";
+                key-pressed(event) => { if event.text == Key.Escape { root.close(); return accept; } return reject; }
+            }
+            Text { text: root.stats-note; color: Colors.secondary(root.theme-index); overflow: elide; accessible-label: root.stats-note; }
+        }
+    }
+}

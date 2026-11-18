@@ -1,0 +1,206 @@
+import { Button, CheckBox, ListView, Palette } from "std-widgets.slint";
+import { SensorRow, ColumnSpec, Colors } from "common.slint";
+export { SensorRow, ColumnSpec }
+export { DetailsWindow } from "details.slint";
+export { SettingsWindow } from "settings.slint";
+
+export component MainWindow inherits Window {
+    out property <image> branding-image: @image-url("../../assets/branding/siliconwatch-icon.png");
+    icon: root.branding-image;
+    title: "SiliconWatch — Sensors";
+    preferred-width: 1120px;
+    preferred-height: 680px;
+    min-width: 760px;
+    min-height: 520px;
+    in property <[SensorRow]> rows;
+    in property <[ColumnSpec]> columns;
+    in-out property <int> selected-row: -1;
+    in property <string> status: "Connecting to the local API…";
+    in property <string> stats-note: "Session statistics · valid observations received";
+    in property <string> notice;
+    in property <string> ui-font-family;
+    in property <length> ui-font-size: 14px;
+    in property <length> row-height: 28px;
+    in property <length> table-width: 1048px;
+    in property <int> theme-index: 0;
+    in-out property <bool> temperature-fahrenheit;
+    in property <bool> row-separators: true;
+    in property <bool> alternate-rows;
+    callback select-row(int);
+    callback activate-row(int);
+    callback toggle-group(int);
+    callback navigate(string);
+    callback settings();
+    callback reconnect();
+    callback unit-changed(bool);
+    callback reset-statistics();
+    callback worker-wakeup();
+    callback tray-wakeup();
+
+    background: Colors.canvas(root.theme-index);
+    default-font-family: root.ui-font-family;
+    default-font-size: root.ui-font-size;
+    init => { Palette.color-scheme = root.theme-index == 2 ? ColorScheme.light : ColorScheme.dark; }
+    changed theme-index => { Palette.color-scheme = root.theme-index == 2 ? ColorScheme.light : ColorScheme.dark; }
+    public function focus-table() { table-focus.focus(); }
+    public function ensure-row-visible(index: int) {
+        if index < 0 || index >= root.rows.length { return; }
+        if index * root.row-height + sensor-list.viewport-y < 0px {
+            sensor-list.viewport-y = -index * root.row-height;
+        }
+        if (index + 1) * root.row-height + sensor-list.viewport-y > sensor-list.visible-height {
+            sensor-list.viewport-y = sensor-list.visible-height - (index + 1) * root.row-height;
+        }
+    }
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 12px;
+            Image { source: @image-url("../../assets/branding/siliconwatch-icon.png"); width: 32px; height: 32px; image-fit: contain; accessible-role: none; }
+            Text { text: "Sensors"; color: Colors.text(root.theme-index); font-size: 24px; font-weight: 600; }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Settings"; clicked => { root.settings(); } }
+            Button { text: "Reconnect"; clicked => { root.reconnect(); } }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Text { text: root.status; color: Colors.text(root.theme-index); wrap: word-wrap; horizontal-stretch: 1; accessible-label: "Observation status: " + root.status; }
+            CheckBox { text: "Fahrenheit (°F)"; checked <=> root.temperature-fahrenheit; toggled => { root.unit-changed(self.checked); } }
+        }
+        if !root.notice.is-empty: Text { text: root.notice; color: Colors.caution(root.theme-index); overflow: elide; accessible-label: root.notice; }
+        table-frame := Rectangle {
+            vertical-stretch: 1;
+            min-height: 160px;
+            border-width: table-focus.has-focus ? 2px : 1px;
+            border-color: table-focus.has-focus ? Colors.focus(root.theme-index) : Colors.line(root.theme-index);
+            background: Colors.panel(root.theme-index);
+            VerticalLayout {
+                padding: 2px;
+                spacing: 0px;
+                Rectangle {
+                    height: max(34px, root.ui-font-size + 18px);
+                    clip: true;
+                    background: Colors.panel(root.theme-index);
+                    HorizontalLayout {
+                        x: sensor-list.viewport-x;
+                        width: max(root.table-width, sensor-list.visible-width);
+                        spacing: 0px;
+                        for column in root.columns: Rectangle {
+                            width: column.width;
+                            horizontal-stretch: 0;
+                            Text {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                height: parent.height;
+                                text: column.title;
+                                color: Colors.secondary(root.theme-index);
+                                horizontal-alignment: column.index == 0 ? left : right;
+                                vertical-alignment: center;
+                                font-weight: 600;
+                            }
+                        }
+                    }
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Colors.line(root.theme-index); }
+                }
+                table-focus := FocusScope {
+                    vertical-stretch: 1;
+                    accessible-role: list;
+                    accessible-label: "Sensors and session statistics";
+                    accessible-item-count: root.rows.length;
+                    accessible-delegate-focus: root.selected-row;
+                    callback navigation(string);
+                    navigation(action) => {
+                        if action == "activate" { root.activate-row(root.selected-row); }
+                        else if action == "toggle" { root.toggle-group(root.selected-row); }
+                        else if action != "escape" { root.navigate(action); }
+                    }
+                    key-pressed(event) => { if event.text == Key.UpArrow { self.navigation("up"); return accept; }
+                        if event.text == Key.DownArrow { self.navigation("down"); return accept; }
+                        if event.text == Key.LeftArrow { self.navigation("left"); return accept; }
+                        if event.text == Key.RightArrow { self.navigation("right"); return accept; }
+                        if event.text == Key.Home { self.navigation("home"); return accept; }
+                        if event.text == Key.End { self.navigation("end"); return accept; }
+                        if event.text == Key.PageUp { self.navigation("page-up"); return accept; }
+                        if event.text == Key.PageDown { self.navigation("page-down"); return accept; }
+                        if event.text == Key.Return { self.navigation("activate"); return accept; }
+                        if event.text == Key.Space { self.navigation("toggle"); return accept; }
+                        if event.text == Key.Escape { self.navigation("escape"); return accept; } return reject; }
+                    sensor-list := ListView {
+                        accessible-role: none;
+
+                        viewport-width: max(root.table-width, self.visible-width);
+                        horizontal-scrollbar-policy: as-needed;
+
+                        for row[index] in root.rows: Rectangle {
+                            width: sensor-list.viewport-width;
+                            height: root.row-height;
+                            background: index == root.selected-row ? Colors.selection(root.theme-index) : root.alternate-rows && mod(index, 2) == 1 && root.theme-index != 0 ? Colors.canvas(root.theme-index) : Colors.panel(root.theme-index);
+                            accessible-role: list-item;
+                            accessible-label: row.spoken;
+                            accessible-item-selectable: true;
+                            accessible-item-selected: index == root.selected-row;
+                            accessible-item-index: index;
+                            accessible-expandable: row.group;
+                            accessible-expanded: row.expanded;
+                            accessible-action-default => { root.select-row(index); if row.group { root.toggle-group(index); } else { root.activate-row(index); } }
+                            accessible-action-expand => { if row.group && !row.expanded { root.toggle-group(index); } }
+                            if row.group: HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                Text { text: row.expanded ? "▾" : "▸"; width: 24px; color: Colors.secondary(root.theme-index); vertical-alignment: center; accessible-role: none; }
+                                Text { text: row.label; color: Colors.text(root.theme-index); font-weight: 600; vertical-alignment: center; overflow: elide; accessible-role: none; }
+                                Text { text: row.quality; color: Colors.caution(root.theme-index); vertical-alignment: center; horizontal-alignment: right; accessible-role: none; }
+                            }
+                            if !row.group: HorizontalLayout {
+                                spacing: 0px;
+                                for column in root.columns: Rectangle {
+                                    width: column.width;
+                                    horizontal-stretch: 0;
+                                    HorizontalLayout {
+                                        padding-left: column.index == 0 ? 28px : 10px;
+                                        padding-right: 10px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: column.index == 0 ? row.label : column.index == 1 ? row.current : column.index == 2 ? row.minimum : column.index == 3 ? row.maximum : row.average;
+                                            color: Colors.text(root.theme-index);
+                                            horizontal-alignment: column.index == 0 ? left : right;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            font-weight: column.index == 1 ? 600 : 400;
+                                            accessible-role: none;
+                                        }
+                                        if column.index == 0 && !row.quality.is-empty: Text {
+                                            text: row.quality;
+                                            color: Colors.caution(root.theme-index);
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            accessible-role: none;
+                                        }
+                                    }
+                                }
+                            }
+                            if root.row-separators: Rectangle { y: parent.height - 1px; height: 1px; background: Colors.line(root.theme-index); opacity: 0.45; }
+                            TouchArea {
+                                clicked => { table-focus.focus(); root.select-row(index); if row.group { root.toggle-group(index); } }
+                                double-clicked => { if !row.group { root.activate-row(index); } }
+                            }
+                        }
+
+                    }
+                }
+            }
+
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            height: max(34px, root.ui-font-size * 1.5 + 12px);
+            Button { text: "Open Details"; enabled: root.selected-row >= 0; clicked => { root.activate-row(root.selected-row); } }
+            Button { text: "Reset Statistics…"; clicked => { root.reset-statistics(); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        Text { text: root.stats-note; color: Colors.secondary(root.theme-index); overflow: elide; accessible-label: root.stats-note; }
+    }
+}

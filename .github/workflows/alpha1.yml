@@ -11,7 +11,7 @@ jobs:
   rust:
     name: Rust 1.85.0
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       RUSTUP_TOOLCHAIN: 1.85.0
       RUST_TEST_NOCAPTURE: '1'
@@ -22,14 +22,27 @@ jobs:
           persist-credentials: false
       - name: Install the declared minimum Rust toolchain
         run: rustup toolchain install 1.85.0 --profile minimal --component rustfmt --component clippy
+      - name: Install native GUI build and private-bus test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config cmake libfontconfig1-dev fonts-dejavu-core \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-dev \
+            libxcb1-dev libxcursor-dev libxi-dev libegl1-mesa-dev libgl1-mesa-dev dbus
       - name: Formatting
-        run: cargo fmt --check
+        run: cargo fmt --all --check
       - name: Clippy
-        run: cargo clippy --locked -- -D warnings
-      - name: Tests
-        run: cargo test --locked
+        run: cargo clippy --workspace --locked -- -D warnings
+      - name: GUI all-target Clippy
+        run: cargo clippy -p siliconwatch-gui --all-targets --features ui-verification --locked -- -D warnings
+      - name: Workspace tests and doctests
+        run: cargo test --workspace --locked
+      - name: Private session-bus GUI tests
+        run: cargo test -p siliconwatch-gui --locked private_bus_ -- --ignored
+      - name: Vendored fontdue compatibility tests
+        run: cargo test --manifest-path vendor/fontdue-0.9.5/Cargo.toml --locked
       - name: Build the fixture executable
-        run: cargo +1.85.0 build --release --locked --target-dir target/provider-latency
+        run: cargo +1.85.0 build --release --workspace --locked --target-dir target/provider-latency
       - name: Python diagnostic fixtures
         timeout-minutes: 5
         run: |

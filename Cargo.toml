@@ -14,3 +14,12 @@ signal-hook = { version = "0.4.5", default-features = false, features = ["iterat
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.191"
+
+[workspace]
+members = ["gui"]
+exclude = ["vendor/fontdue-0.9.5"]
+default-members = ["."]
+resolver = "3"
+
+[patch.crates-io]
+fontdue = { path = "vendor/fontdue-0.9.5" }

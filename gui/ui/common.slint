@@ -1,0 +1,25 @@
+export struct SensorRow {
+    label: string,
+    quality: string,
+    current: string,
+    minimum: string,
+    maximum: string,
+    average: string,
+    count: string,
+    spoken: string,
+    group: bool,
+    expanded: bool,
+}
+
+export struct ColumnSpec { title: string, index: int, width: length }
+
+export global Colors {
+    public pure function canvas(mode: int) -> brush { return mode == 2 ? #f5f7fa : mode == 1 ? #15191f : #000000; }
+    public pure function panel(mode: int) -> brush { return mode == 2 ? #ffffff : mode == 1 ? #1c222b : #000000; }
+    public pure function text(mode: int) -> brush { return mode == 2 ? #17202d : #e6edf3; }
+    public pure function secondary(mode: int) -> brush { return mode == 2 ? #49576b : #aebbc9; }
+    public pure function line(mode: int) -> brush { return mode == 2 ? #b4bfce : #394452; }
+    public pure function selection(mode: int) -> brush { return mode == 2 ? #d8e7fb : #25394f; }
+    public pure function focus(mode: int) -> brush { return mode == 2 ? #245dab : #8dbaff; }
+    public pure function caution(mode: int) -> brush { return mode == 2 ? #795000 : #edc778; }
+}
