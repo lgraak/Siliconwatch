@@ -4,38 +4,57 @@
 
 # SiliconWatch
 
-**Linux hardware monitoring, built in Rust.**
+SiliconWatch is an experimental Linux hardware monitor built in Rust. It has a native desktop GUI and a CLI for headless monitoring.
 
-SiliconWatch is an experimental Linux hardware-monitoring application with a native desktop GUI and a CLI/headless monitoring tool. It reads the temperatures, voltages and fan speeds exposed by Linux drivers, keeps unavailable or questionable readings explicit, and leaves hardware settings unchanged.
+It reads temperatures, voltages and fan speeds exposed by Linux drivers. It marks unavailable or questionable readings and leaves hardware settings unchanged.
 
-The dense, HWiNFO64-inspired sensor view is built for users who want familiar, detailed monitoring on Linux. A separate foreground daemon owns acquisition; the GUI reads its cache through a local read-only API.
+The dense sensor view takes inspiration from HWiNFO64 and offers familiar, detailed monitoring on Linux. A separate foreground daemon collects readings. The GUI reads the daemon's cache through a local read-only API.
 
-**Status: Alpha 1 candidate — Prototype 010.** Chris has conditionally authorized experimental external alpha testing after the verification and publication gates pass. Documented qualification gaps remain. This is read-only experimental monitoring, not production-ready software or safety-critical hardware protection.
+**Status: Alpha 1 candidate, Prototype 010.** Chris has conditionally authorized experimental external alpha testing after the verification and publication gates pass. Some qualification checks remain incomplete. This software provides experimental, read-only monitoring. It is not ready for production use or safety-critical hardware protection.
 
-**Public alpha download coming soon.** The intended version is `v0.1.0-alpha.1`. No public alpha download is available yet; follow the [GitHub repository](https://github.com/lgraak/Siliconwatch) and [project website](https://siliconwatch.cgillett.com/) for updates.
+**Public alpha download coming soon.** The intended version is `v0.1.0-alpha.1`. No public alpha download is available yet. Follow the [GitHub repository](https://github.com/lgraak/Siliconwatch) and [project website](https://siliconwatch.cgillett.com/) for updates.
 
 ![Native SiliconWatch OLED Black sensor table with Current, Minimum, Maximum and Average columns](docs/milestones/010-native-gui/main-oled.png)
 
-*Actual native OLED Black GUI with demonstration fixture readings. This is a running application capture, not a design mockup or a claim about a particular machine's sensors.*
+*The running native OLED Black GUI with demonstration fixture readings. This is an application capture, not a design mockup. It makes no claim about a particular machine's sensors.*
 
 ## Implemented in the Alpha 1 candidate
 
-- **Native Slint desktop GUI:** OLED Black by default, plus Dark and Light themes; compact hierarchical provider/device groups; keyboard navigation; configurable fonts, row density and columns.
-- **Temperatures, voltages and fan RPM:** CPU/GPU temperatures where exposed by Linux, NVMe and other available hwmon temperatures, voltage inputs and fan-speed inputs. Coverage depends on the machine and its drivers.
-- **Current, Minimum, Maximum and Average:** session statistics over distinct valid observations received by the GUI. They are not time-weighted or persistent history. Repeated cache reads, redraws and unit changes do not add samples.
-- **Device Details:** a reusable native window shows the selected source's available readings, raw and canonical values, identity evidence, diagnostics and observation timing. Unsupported, failed, stale and historical states remain visible.
-- **CLI and foreground daemon:** one-shot tables/JSON, bounded sampling, cooperative shutdown and an opt-in, current-user Unix-socket API with `get_info` and `get_snapshot`. GUI refresh does not trigger another hardware scan.
-- **Desktop integration and portable preferences:** a StatusNotifier-compatible tray, versioned TOML appearance/layout settings with reviewed import/export, and Celsius/Fahrenheit display preferences. Conversion changes presentation only; raw readings remain intact.
+### Native desktop GUI
 
-Minimize to Tray is **off by default**. Closing Sensors exits the GUI; enabling the preference keeps the same session running while a usable tray host is available. Quit always exits the GUI and leaves the separately started daemon running.
+The Slint GUI uses the OLED Black theme by default. Dark and Light themes are also available. It groups providers and devices in a compact hierarchy and supports keyboard navigation. You can configure fonts, row density and columns.
+
+### Sensor readings
+
+SiliconWatch reads CPU/GPU temperatures where Linux exposes them, NVMe and other available hwmon temperatures, voltage inputs and fan RPM. Coverage depends on the machine and its drivers.
+
+### Session statistics
+
+Current, Minimum, Maximum and Average use distinct valid observations received by the GUI. These statistics cover the current session. They are not time-weighted and do not provide persistent history. Repeated cache reads, redraws and unit changes do not add samples.
+
+### Device Details
+
+The reusable native Device Details window shows the selected source's available readings, raw and canonical values, identity evidence, diagnostics and observation timing. Unsupported, failed, stale and historical states remain visible.
+
+### CLI and foreground daemon
+
+CLI and daemon options include one-shot tables or JSON, bounded sampling and cooperative shutdown. An opt-in Unix-socket API provides `get_info` and `get_snapshot` for the current user. Refreshing the GUI does not trigger another hardware scan.
+
+### Desktop integration and preferences
+
+The GUI has a StatusNotifier-compatible tray and versioned TOML settings for appearance and layout. You can review settings before importing or exporting them. Celsius/Fahrenheit preferences change the display only. Raw readings remain intact.
+
+**Minimize to Tray** is off by default. Closing **Sensors** exits the GUI. If you enable the preference, the same session keeps running while a usable tray host is available. **Quit** always exits the GUI and leaves the separately started daemon running.
 
 <a id="try-the-prototype"></a>
 
 ## Build and run from source
 
-The GUI commands below apply to a **Prototype 010 candidate checkout containing `gui/`**. Check the checkout and release status before using them; these source instructions do not imply an available alpha release or installer.
+The GUI commands require a **Prototype 010 candidate checkout containing `gui/`**. Check the checkout and release status before using them. These source instructions do not mean an alpha release or installer is available.
 
-Use Linux and an installed Rust 1.85.0 toolchain. The GUI also needs a working desktop, OpenGL, and the platform graphics/font libraries used by its native backend. Distribution-specific prerequisites are not installed automatically. Slint and slint-build remain pinned to 1.13.1; Rust 1.85 compatibility uses the documented [fontdue 0.9.5 local patch](vendor/fontdue-0.9.5-PATCH.md).
+Use Linux with the Rust 1.85.0 toolchain installed. The GUI also needs a working desktop, OpenGL, and the platform graphics and font libraries for its native backend. Distribution-specific prerequisites are not installed automatically.
+
+Slint and slint-build remain pinned to 1.13.1. Rust 1.85 compatibility uses the documented [fontdue 0.9.5 local patch](vendor/fontdue-0.9.5-PATCH.md).
 
 From the candidate repository root, build the CLI/daemon and GUI:
 
@@ -51,6 +70,8 @@ cargo +1.85.0 build --locked --release -p siliconwatch
 
 ### CLI readings
 
+Run these commands as your normal user. CLI acquisition is independent of the daemon. For shared monitoring, use the daemon and GUI workflow below.
+
 List currently exposed sensors or emit a JSON snapshot:
 
 ```sh
@@ -64,9 +85,11 @@ Take five acquisition attempts with JSON-lines output:
 cargo +1.85.0 run --locked --release -p siliconwatch -- sample --count 5 --interval-ms 1000 --json-lines
 ```
 
-Run these as your normal user. CLI acquisition is independent of the daemon; use the daemon/GUI workflow below for shared monitoring. Sampling exit 0 means the requested attempts completed, even when individual attempts contain recoverable errors; inspect each record. See [sampling behavior and limitations](docs/milestones/003-bounded-foreground-sampling.md) and [best-effort source identities](docs/milestones/002-stable-sensor-identity.md).
+Sampling exit 0 means the requested attempts completed. Individual attempts can still contain recoverable errors, so inspect each record. See [sampling behavior and limitations](docs/milestones/003-bounded-foreground-sampling.md) and [best-effort source identities](docs/milestones/002-stable-sensor-identity.md).
 
 ### Foreground daemon and local API
+
+Use one daemon instance and run it as your non-root user. Do not use `sudo`.
 
 For headless acquisition without an API listener:
 
@@ -80,11 +103,11 @@ To connect the GUI, start the daemon **with `--local-api` instead**:
 cargo +1.85.0 run --locked --release -p siliconwatch -- daemon --interval-ms 1000 --stale-after-ms 3000 --local-api
 ```
 
-Use one daemon instance. It stays in the foreground and writes lifecycle notices to stderr. Ctrl-C or SIGTERM requests cooperative shutdown; blocked drivers or output can delay completion. No service is installed. See the [daemon lifecycle report](docs/milestones/008-headless-daemon-lifecycle.md).
+The daemon stays in the foreground and writes lifecycle notices to stderr. Ctrl-C or SIGTERM requests cooperative shutdown. Blocked drivers or output can delay completion. No service is installed. See the [daemon lifecycle report](docs/milestones/008-headless-daemon-lifecycle.md).
 
-The API listens at `$XDG_RUNTIME_DIR/siliconwatch/api.sock`. The existing runtime directory must be private and owned by your non-root user. The daemon checks directory permissions and peer identity; neither it nor the GUI bypasses permissions, takes over another instance or automatically repairs stale endpoints. Do not run it through `sudo`.
+The API listens at `$XDG_RUNTIME_DIR/siliconwatch/api.sock`. The runtime directory must already exist, be private and belong to your non-root user. The daemon checks directory permissions and peer identity. Neither the daemon nor the GUI bypasses permissions, takes over another instance or automatically repairs stale endpoints.
 
-Only `get_info` and `get_snapshot` are exposed. The latter reads the existing cache; it does not scan hardware. This is a versioned JSON protocol over a local Unix socket, not an HTTP service. See the [API contract and client example](docs/api/local-v1.md) and [Prototype 009 report](docs/milestones/009-local-readonly-api.md).
+The API exposes only `get_info` and `get_snapshot`. The `get_snapshot` request reads the existing cache without scanning hardware. The API uses a versioned JSON protocol over a local Unix socket. It is not an HTTP service. See the [API contract and client example](docs/api/local-v1.md) and [Prototype 009 report](docs/milestones/009-local-readonly-api.md).
 
 ### Launch the GUI
 
@@ -94,66 +117,85 @@ With the API-enabled daemon running, use another terminal:
 cargo +1.85.0 run --locked --release -p siliconwatch-gui -- --refresh-ms 1000
 ```
 
-The GUI connects automatically to the current user's socket. **Reconnect** retries under the same permission checks and rate limits; it never requests a hardware scan. For a slower daemon acquisition interval, choose a GUI refresh interval at least as long. GUI refresh accepts 1000–60000 milliseconds and defaults to 1000.
+The GUI connects automatically to the current user's socket. **Reconnect** retries under the same permission checks and rate limits. It never requests a hardware scan.
 
-Double-click a sensor, select it and press Enter, or choose **Open Details**. See the [GUI guide](docs/GUI.md) for keyboard controls, tray behavior, freshness labels, display preferences and recovery.
+For a slower daemon acquisition interval, choose a GUI refresh interval at least as long. GUI refresh accepts 1000 to 60000 milliseconds and defaults to 1000.
+
+To view a sensor's details, double-click it, select it and press Enter, or choose **Open Details**. See the [GUI guide](docs/GUI.md) for keyboard controls, tray behavior, freshness labels, display preferences and recovery.
 
 ## Import and export appearance settings
 
-These are GUI actions, not CLI subcommands:
+Import and export are GUI actions. They are not CLI subcommands.
 
 1. Open **Settings → Import, Export & Recovery**.
 2. Enter a full absolute file path. There is no native file picker in this candidate.
-3. Choose **Export Settings…** or **Import Settings…**, review the preview, then confirm or cancel.
+3. Choose **Export Settings…** or **Import Settings…**.
+4. Review the preview, then confirm or cancel.
 
-Leave **Include device group preferences in export** off for an appearance-only profile. Optional device-group selectors can reveal source topology and require review when imported. Profiles do not contain sensor history, session statistics, credentials, API access policy or hardware controls.
+For an appearance-only profile, leave **Include device group preferences in export** off. Optional device-group selectors can reveal source topology and require review when imported. Profiles do not contain sensor history, session statistics, credentials, API access policy or hardware controls.
 
-Settings are stored at `$XDG_CONFIG_HOME/siliconwatch/config.toml`, falling back to `~/.config/siliconwatch/config.toml`. Invalid files remain untouched; the GUI reports recovery/unsaved state. Importing appearance preferences does not reset session statistics or change daemon behavior. Full import, export, backup and recovery steps are in the [GUI guide](docs/GUI.md#portable-settings).
+The GUI stores settings at `$XDG_CONFIG_HOME/siliconwatch/config.toml`, falling back to `~/.config/siliconwatch/config.toml`. It leaves invalid files untouched and reports recovery or unsaved state. Importing appearance preferences does not reset session statistics or change daemon behavior. See the [GUI guide](docs/GUI.md#portable-settings) for full import, export, backup and recovery steps.
 
 ## Hardware compatibility
 
-SiliconWatch consumes measurements exposed by Linux monitoring drivers. Available readings depend on hardware, firmware and kernel-driver support. A familiar source name is not proof of physical component identity, and missing fan RPM can indicate missing driver support rather than an application defect.
+SiliconWatch reads measurements exposed by Linux monitoring drivers. Available readings depend on hardware, firmware and kernel-driver support. A familiar source name does not prove a physical component's identity. Missing fan RPM can mean missing driver support rather than an application defect.
 
-Some Super I/O monitoring chips need additional drivers. SiliconWatch **does not install or load kernel modules**. Third-party modules can introduce kernel-version compatibility, signature/trust and ongoing maintenance requirements; a configuration that works on one machine is not a universal recommendation.
+Some Super I/O monitoring chips need additional drivers. SiliconWatch **does not install or load kernel modules**. Third-party modules can add requirements for kernel-version compatibility, signatures, trust and ongoing maintenance. A configuration that works on one machine is not a universal recommendation.
 
-For example, on a tested **GMKtec EVO-X1 with an IT8613E monitoring chip**, fan RPM became available after Linux exposed the channels through an already-installed `it87` driver. SiliconWatch reported `fan2_input` and `fan3_input` without scaling or invented CPU/System labels. This was a host-specific compatibility observation, not independent RPM calibration, a verified physical fan mapping, or a guarantee of future kernel/reboot compatibility.
+On a tested GMKtec EVO-X1 with an IT8613E monitoring chip, fan RPM became available through an already-installed `it87` driver. Linux exposed the channels, and SiliconWatch reported `fan2_input` and `fan3_input` without scaling or invented CPU/System labels.
 
-No module-loading, forced device-ID or firmware changes are performed by SiliconWatch. Report missing or questionable readings through [GitHub Issues](https://github.com/lgraak/Siliconwatch/issues), omitting private machine identifiers and raw captures unless you have reviewed what they reveal.
+That result applies to the tested host. It does not provide independent RPM calibration, verify physical fan mapping or guarantee compatibility with future kernels or reboots.
+
+SiliconWatch does not load modules, force device IDs or change firmware. Report missing or questionable readings through [GitHub Issues](https://github.com/lgraak/Siliconwatch/issues). Omit private machine identifiers and raw captures unless you have reviewed what they reveal.
 
 ## Native package candidates
 
-Native `.deb`, `.rpm` and `.pkg.tar.zst` candidates have been prepared with Rust 1.85 in Debian 12, Fedora 44 and Arch build environments. Installation, fixture/API checks and removal were exercised on Debian 12, Ubuntu 24.04, Fedora 44 and the recorded Arch rolling image. The Debian GUI requires glibc 2.35; Fedora/Arch builds require 2.43. Linux Mint, CachyOS and EndeavourOS package installation are not established by the base-distribution tests.
+Native `.deb`, `.rpm` and `.pkg.tar.zst` candidates were prepared with Rust 1.85 in Debian 12, Fedora 44 and Arch build environments. Installation, fixture/API checks and removal were tested on Debian 12, Ubuntu 24.04, Fedora 44 and the recorded Arch rolling image.
 
-See the [installation guide](packaging/linux/INSTALL.md) and [package preparation report](docs/milestones/010-multidistro-package-preparation.md) for exact versions, dependencies, hashes and desktop qualification limits. Installation does not start a daemon, enable a service or configure a driver. The packages remain unsigned candidates until separately approved release publication; no portable AppImage is claimed.
+The Debian GUI requires glibc 2.35. Fedora/Arch builds require 2.43. Tests on these base distributions do not establish package installation on Linux Mint, CachyOS or EndeavourOS.
+
+See the [installation guide](packaging/linux/INSTALL.md) and [package preparation report](docs/milestones/010-multidistro-package-preparation.md) for exact versions, dependencies, hashes and desktop qualification limits. Installation does not start a daemon, enable a service or configure a driver. The packages remain unsigned candidates until release publication receives separate approval. No portable AppImage is claimed.
 
 ## Known limitations
 
-- Alpha software for **read-only monitoring**: no hardware controls, protective shutdown, alarms, calibration or guaranteed sensor coverage.
-- Statistics are session-only; stale/historical readings never become current merely because a response arrived recently. Physical measurement age and hardware health are not certified.
-- Production launch/tray checks passed on the current KDE Wayland and XWayland host. The fresh instrumented Wayland full-workflow and lifecycle probes timed out waiting for initial snapshots; their cause remains unresolved. XWayland full workflow, profile restarts and lifecycle checks passed. These results do not establish other distributions' actual desktop sessions. A separate Xorg session, GNOME, mixed-monitor behavior, physical tray interaction and complete human keyboard/screen-reader qualification remain open.
-- Numerical CPU/RSS/latency targets have not been fully qualified. There is no universal Linux binary-portability claim or publicly released AppImage.
+- This alpha provides **read-only monitoring**. It has no hardware controls, protective shutdown, alarms or calibration. Sensor coverage is not guaranteed.
+- Statistics cover the current session only. A recent response does not make stale or historical readings current. Physical measurement age and hardware health are not certified.
+- Production launch and tray checks passed on the current KDE Wayland and XWayland host. Fresh instrumented Wayland full-workflow and lifecycle probes timed out while waiting for initial snapshots. The cause remains unresolved.
+- XWayland full workflow, profile restarts and lifecycle checks passed. These results do not establish behavior in other distributions' actual desktop sessions.
+- Checks remain open for a separate Xorg session, GNOME, mixed-monitor behavior and physical tray interaction. Complete human keyboard and screen-reader qualification also remains open.
+- Numerical CPU/RSS/latency targets are not fully qualified. There is no universal Linux binary-portability claim or publicly released AppImage.
 
-The [Prototype 010 implementation report](docs/milestones/010-native-gui.md) records executed checks and limitations. The [approved proposal](docs/milestones/010-native-gui-proposal.md) remains a historical planning record; later implementation approvals govern the working candidate.
+The [Prototype 010 implementation report](docs/milestones/010-native-gui.md) records the checks that ran and their limitations. The [approved proposal](docs/milestones/010-native-gui-proposal.md) is a historical planning record. Later implementation approvals govern the working candidate.
 
 ## Future direction
 
-Graphs and persistent history, configurable dashboards, calculated sensors, broader hardware providers, portable diagnostic reports, remote monitoring, alarms and protective actions remain future work. Planned capabilities are described in [design decisions](docs/DESIGN_DECISIONS.md); they are not current Alpha 1 features. No subsequent prototype or deployment is implied by this documentation update.
+Planned features include:
+
+- Graphs and persistent history
+- Configurable dashboards
+- Calculated sensors
+- Broader hardware providers
+- Portable diagnostic reports
+- Remote monitoring
+- Alarms and protective actions
+
+These are future plans, not current Alpha 1 features. See the [design decisions](docs/DESIGN_DECISIONS.md) for details. This documentation update does not imply a subsequent prototype or deployment.
 
 ## Help shape SiliconWatch
 
-Interested in Rust, Linux hardware interfaces, native desktop applications, or testing across different systems? [Open an issue](https://github.com/lgraak/Siliconwatch/issues) to share a use case, discuss hardware support, report a bug, or propose an area you'd like to work on.
+You can help with Rust, Linux hardware interfaces, native desktop applications or testing across different systems. [Open an issue](https://github.com/lgraak/Siliconwatch/issues) to share a use case, discuss hardware support, report a bug or propose an area to work on.
 
 Contributions follow the [DCO signoff policy in Decision 41](docs/DESIGN_DECISIONS.md#41-contributor-provenance--accepted). Contributors retain their copyright; no CLA or copyright assignment is required.
 
 ## Acknowledgments
 
-SiliconWatch is inspired in part by [HWiNFO64](https://www.hwinfo.com/), developed by **Martin Malík of REALiX**.
+SiliconWatch takes inspiration in part from [HWiNFO64](https://www.hwinfo.com/), developed by Martin Malík of REALiX.
 
-HWiNFO64 has set an exceptionally high standard for comprehensive hardware monitoring, sensor accuracy, and system diagnostics. Its depth of information and attention to detail have been a significant influence on the vision for SiliconWatch.
+HWiNFO64 sets a high standard for comprehensive hardware monitoring, sensor accuracy and system diagnostics. Its depth of information and attention to detail helped shape SiliconWatch.
 
-We sincerely appreciate the years of work Martin has invested in HWiNFO and the value his software brings to the hardware enthusiast and engineering communities.
+We appreciate Martin's years of work on HWiNFO and its value to hardware enthusiasts and engineers.
 
-SiliconWatch is an independently developed, open-source project intended to bring a similarly comprehensive monitoring experience to Linux.
+SiliconWatch is an independent, open-source project that aims to bring similarly comprehensive monitoring to Linux.
 
 **SiliconWatch is not affiliated with, endorsed by, or derived from HWiNFO64 or REALiX.**
 
