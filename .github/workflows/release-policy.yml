@@ -1,0 +1,49 @@
+name: Release policy verification
+
+on:
+  workflow_call:
+    secrets:
+      RELEASE_POLICY_READER:
+        required: true
+    inputs:
+      publication:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  origin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require a fresh dispatch of a canonical, protected main workflow
+        shell: bash
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REPOSITORY_ID" = 1459688906
+          test "$GITHUB_REPOSITORY" = lgraak/Siliconwatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          case "$GITHUB_WORKFLOW_REF" in
+            lgraak/Siliconwatch/.github/workflows/release-candidate.yml@refs/heads/main|lgraak/Siliconwatch/.github/workflows/release-publish.yml@refs/heads/main) ;;
+            *) exit 1 ;;
+          esac
+
+  settings:
+    needs: origin
+    if: github.run_attempt == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: release-policy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read current protection and secret metadata
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_POLICY_READER }}
+          VERIFY_PUBLICATION: ${{ inputs.publication }}
+        run: python3 -I .github/scripts/check_release_policy.py "$VERIFY_PUBLICATION"

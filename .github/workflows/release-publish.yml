@@ -1,0 +1,112 @@
+name: Release approval
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Successful release-candidate workflow run ID
+        required: true
+        type: string
+      source_commit:
+        description: Full source commit SHA in the candidate summary
+        required: true
+        type: string
+      version:
+        description: Candidate version, including v
+        required: true
+        type: string
+        default: v0.1.0-alpha.2
+      manifest_sha256:
+        description: SHA-256 of candidate.json from the reviewed run
+        required: true
+        type: string
+      publish:
+        description: Request Chris's approval to publish these exact artifacts
+        type: boolean
+        default: false
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: siliconwatch-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  VERSION: ${{ inputs.version }}
+  SOURCE_COMMIT: ${{ inputs.source_commit }}
+  CANDIDATE_RUN: ${{ inputs.candidate_run }}
+  MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+
+jobs:
+  policy:
+    uses: ./.github/workflows/release-policy.yml
+    secrets:
+      RELEASE_POLICY_READER: ${{ secrets.RELEASE_POLICY_READER }}
+
+  verify:
+    needs: policy
+    if: github.run_attempt == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release-candidate
+    steps:
+      - name: Require the canonical main workflow
+        run: |
+          test "$GITHUB_REPOSITORY" = lgraak/Siliconwatch
+          test "$GITHUB_REF" = refs/heads/main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify candidate origin, contents and visible version collisions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_KEY: ${{ secrets.CANDIDATE_KEY }}
+        run: |
+          python3 scripts/release/promote.py --repository "$GITHUB_REPOSITORY" \
+            --run-id "$CANDIDATE_RUN" --version "$VERSION" --commit "$SOURCE_COMMIT" --digest "$MANIFEST_SHA256"
+          {
+            echo "### Verified candidate"
+            echo "Version: \`$VERSION\`"
+            echo "Source: \`$SOURCE_COMMIT\`"
+            echo "Manifest SHA-256: \`$MANIFEST_SHA256\`"
+            echo "[Evidence and artifacts]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publication-policy:
+    needs: verify
+    if: inputs.publish
+    uses: ./.github/workflows/release-policy.yml
+    secrets:
+      RELEASE_POLICY_READER: ${{ secrets.RELEASE_POLICY_READER }}
+    with:
+      publication: true
+
+  publish:
+    needs: [verify, publication-policy]
+    if: inputs.publish && github.run_attempt == '1' && github.ref == 'refs/heads/main' && github.repository == 'lgraak/Siliconwatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    environment:
+      name: release
+      url: https://github.com/lgraak/Siliconwatch/actions/runs/${{ inputs.candidate_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check approval and promote the reviewed bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_KEY: ${{ secrets.CANDIDATE_KEY }}
+        run: |
+          python3 scripts/release/promote.py --publish --repository "$GITHUB_REPOSITORY" \
+            --run-id "$CANDIDATE_RUN" --version "$VERSION" --commit "$SOURCE_COMMIT" --digest "$MANIFEST_SHA256"

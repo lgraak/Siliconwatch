@@ -10,9 +10,9 @@ It reads temperatures, voltages and fan speeds exposed by Linux drivers. It mark
 
 The dense sensor view takes inspiration from HWiNFO64 and offers familiar, detailed monitoring on Linux. A separate foreground daemon collects readings. The GUI reads the daemon's cache through a local read-only API.
 
-**Status: Alpha 1 candidate, Prototype 010.** Chris has conditionally authorized experimental external alpha testing after the verification and publication gates pass. Some qualification checks remain incomplete. This software provides experimental, read-only monitoring. It is not ready for production use or safety-critical hardware protection.
+**Public release:** [SiliconWatch Alpha 1 packages and checksums](https://github.com/lgraak/Siliconwatch/releases/tag/v0.1.0-alpha.1). This is experimental, read-only monitoring software.
 
-**Public alpha download coming soon.** The intended version is `v0.1.0-alpha.1`. No public alpha download is available yet. Follow the [GitHub repository](https://github.com/lgraak/Siliconwatch) and [project website](https://siliconwatch.cgillett.com/) for updates.
+Development targets `v0.1.0-alpha.2` with NVIDIA telemetry and GUI monitoring preferences. The [release workflow guide](docs/releases/automation.md) describes how to build, validate and approve an unpublished candidate.
 
 ![Native SiliconWatch OLED Black sensor table with Current, Minimum, Maximum and Average columns](docs/milestones/010-native-gui/main-oled.png)
 
@@ -50,7 +50,7 @@ The GUI has a StatusNotifier-compatible tray and versioned TOML settings for app
 
 ## Build and run from source
 
-The GUI commands require a **Prototype 010 candidate checkout containing `gui/`**. Check the checkout and release status before using them. These source instructions do not mean an alpha release or installer is available.
+The GUI commands require a checkout containing `gui/`. To build the source for a published version, check out its release tag.
 
 Use Linux with the Rust 1.85.0 toolchain installed. The GUI also needs a working desktop, OpenGL, and the platform graphics and font libraries for its native backend. Distribution-specific prerequisites are not installed automatically.
 
@@ -154,7 +154,7 @@ Native `.deb`, `.rpm` and `.pkg.tar.zst` candidates were prepared with Rust 1.85
 
 The Debian GUI requires glibc 2.35. Fedora/Arch builds require 2.43. Tests on these base distributions do not establish package installation on Linux Mint, CachyOS or EndeavourOS.
 
-See the [installation guide](packaging/linux/INSTALL.md) and [package preparation report](docs/milestones/010-multidistro-package-preparation.md) for exact versions, dependencies, hashes and desktop qualification limits. Installation does not start a daemon, enable a service or configure a driver. The packages remain unsigned candidates until release publication receives separate approval. No portable AppImage is claimed.
+See the [installation guide](packaging/linux/INSTALL.md) for native packages and the [Alpha 1 package preparation report](docs/milestones/010-multidistro-package-preparation.md) for its dependencies, hashes and desktop qualification limits. After installation, start the foreground daemon as your normal user.
 
 ## Known limitations
 

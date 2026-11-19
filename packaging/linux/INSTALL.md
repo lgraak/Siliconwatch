@@ -1,32 +1,36 @@
-# SiliconWatch 0.1.0-alpha.1 native package candidate
+# SiliconWatch native Linux packages
 
-These are local review artifacts, not a published or accepted release. Prototype
-010 technical acceptance remains Pending. Read the accompanying verification
-report for the exact tested distributions and desktop limitations. The GUI uses
-Slint 1.13.1 and the existing local read-only API; it does not manage the daemon.
+The examples use the proposed `v0.1.0-alpha.2` package names. Reviewers should use the packages and `SHA256SUMS` from the same candidate. Once a release is approved and published, obtain both from that version's GitHub release.
 
 ## Install
 
 Run the package manager from the directory containing the downloaded candidate.
 The Debian package is built on Debian 12. Ubuntu 24.04 is a separate installation
-target. Linux Mint compatibility requires testing on the intended Mint release.
+target. Test the installed distribution and version before relying on compatibility with Linux Mint, CachyOS or EndeavourOS.
 
 ```sh
-# Debian / Ubuntu / Linux Mint (apt resolves declared dependencies)
-sudo apt install ./siliconwatch-0.1.0-alpha.1-linux-amd64.deb
+# Debian 12 or Ubuntu 24.04
+sudo apt install ./siliconwatch-0.1.0-alpha.2-linux-amd64.deb
 
 # Fedora 44 candidate; see the report before trying other Fedora versions
-sudo dnf install ./siliconwatch-0.1.0-alpha.1-linux-x86_64.rpm
+sudo dnf install ./siliconwatch-0.1.0-alpha.2-linux-x86_64.rpm
 
-# Arch / CachyOS / EndeavourOS (rolling distributions must be up to date)
-sudo pacman -U ./siliconwatch-0.1.0-alpha.1-linux-x86_64.pkg.tar.zst
+# Arch Linux at a compatible rolling snapshot
+sudo pacman -U ./siliconwatch-0.1.0-alpha.2-linux-x86_64.pkg.tar.zst
 ```
 
 The candidates are unsigned. Package-manager trust policy may reject them;
 do not disable global signature verification to make installation succeed.
 In particular, this build does not establish Fedora 45 installation support.
 Derivative compatibility is not implied by a successful base-distribution test.
-Verify SHA-256 against the supplied checksum file before installation.
+Verify the package SHA-256 against the associated checksum manifest before installation. For the Debian package, run the following check.
+
+```sh
+file=siliconwatch-0.1.0-alpha.2-linux-amd64.deb
+awk -v name="$file" '$2 == name' SHA256SUMS | sha256sum --strict --check -
+```
+
+Before upgrading, close the GUI, back up your configuration, and stop the foreground daemon. The updated GUI reads older profiles with defaults. Alpha 1 rejects profiles saved by the new version with a `[monitoring]` table. Restore your pre-upgrade profile before launching Alpha 1 after a downgrade. See the installed `GUI.md` for backup and import instructions.
 
 Installation provides `/usr/bin/siliconwatch`, `/usr/bin/siliconwatch-gui`, a
 desktop entry and the approved project icon. The first executable implements
@@ -96,10 +100,12 @@ Preferences live at `$XDG_CONFIG_HOME/siliconwatch/config.toml`, or
 creates private preferences and retains a prior valid profile as
 `config.toml.bak`. Package installation and removal do not own these files.
 
+**Settings → Monitoring** shows both your requested daemon timings and the current daemon's effective timings. After applying a new request, stop the foreground daemon and restart it with the command displayed in Settings. The GUI’s saved API response timeout applies to its next requests.
+
 ## Missing sensors or a failed GUI launch
 
 Available temperatures, voltages and fan RPM depend on Linux hwmon drivers and
-what they expose on that machine. A missing motherboard sensor is not evidence
+what they expose on that machine. The optional NVIDIA NVML provider can supply GPU temperature, utilization, memory, clocks, performance state and supported fan or power readings. A missing motherboard sensor is not evidence
 that the GUI needs elevated permissions. Review `siliconwatch sensors --json`
 and the GUI diagnostics. Follow the distribution's ordinary supported-driver
 documentation; do not force monitoring drivers, bypass ACPI protections, change

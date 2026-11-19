@@ -1,6 +1,9 @@
 # Native Fedora 44 candidate; common payload and fresh Rust build audited separately.
 # Source0 must contain usr/ with only the reviewed application payload.
 # Binaries must be the fresh, hash-verified Fedora 44 Rust 1.85 build.
+# Default inputs preserve the original standalone Alpha 1 recipe.
+%{!?sw_version:%global sw_version 0.1.0}
+%{!?sw_release:%global sw_release 0.1.alpha.1}
 %global debug_package %{nil}
 # Keep the user's workstation identity out of distributable RPM metadata.
 %global _buildhost siliconwatch-fedora44
@@ -13,8 +16,8 @@
 %global _build_id_links none
 
 Name:           siliconwatch
-Version:        0.1.0
-Release:        0.1.alpha.1%{?dist}
+Version:        %{sw_version}
+Release:        %{sw_release}%{?dist}
 Summary:        Read-only Linux sensor monitoring with a native GUI and CLI
 License:        GPL-3.0-only
 URL:            https://github.com/lgraak/Siliconwatch
@@ -43,8 +46,6 @@ SiliconWatch is an experimental Rust-based Linux hardware-monitoring
 application with a native Slint GUI, CLI, foreground daemon and an opt-in
 current-user read-only local API. Available readings depend on Linux drivers.
 Installation does not start a daemon, install a service or change hardware.
-The application version is 0.1.0-alpha.1; this package is an unpublished
-candidate awaiting the remaining qualification and publication steps.
 
 %prep
 %setup -q -c -T
