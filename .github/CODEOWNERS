@@ -1,0 +1,11 @@
+# Protect the release workflow, policy verifier, qualification evidence and source inputs.
+/.github/                 @lgraak
+/packaging/               @lgraak
+/scripts/release/         @lgraak
+/scripts/source_release/  @lgraak
+/docs/legal/              @lgraak
+/docs/releases/           @lgraak
+/Cargo.toml               @lgraak
+/Cargo.lock               @lgraak
+/gui/Cargo.toml           @lgraak
+/vendor/                  @lgraak
