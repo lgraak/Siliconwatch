@@ -1,7 +1,7 @@
-# Local Alpha 1 candidate packaging recipe. Not an AUR publication.
+# Native candidate packaging recipe. Supply version and hash from the staged build.
 # The checked payload is assembled from the separately logged Rust 1.85 build.
 pkgname=siliconwatch
-pkgver=0.1.0alpha.1
+pkgver="${SW_ARCH_VERSION:-0.1.0alpha.1}"
 pkgrel=1
 pkgdesc='Read-only Linux hardware monitoring with CLI, foreground daemon and native GUI'
 arch=('x86_64')
@@ -24,8 +24,8 @@ depends=(
 )
 optdepends=('dbus: session bus for accessibility and optional StatusNotifier tray integration')
 options=('!strip' '!debug')
-source=('siliconwatch-0.1.0-alpha.1-arch-payload.tar')
-sha256sums=('c888fafd93d278131f2146cacc7683e9f0be577c98d8c36f0409a4951d746d19')
+source=("${SW_ARCH_PAYLOAD:-siliconwatch-0.1.0-alpha.1-arch-payload.tar}")
+sha256sums=("${SW_ARCH_SHA256:-c888fafd93d278131f2146cacc7683e9f0be577c98d8c36f0409a4951d746d19}")
 
 package() {
   cp -a "$srcdir/payload/usr" "$pkgdir/"
