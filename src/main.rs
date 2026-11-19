@@ -1,4 +1,4 @@
-use siliconwatch::hwmon::{self, Snapshot, Status};
+use siliconwatch::hwmon::{Snapshot, Status};
 use siliconwatch::{daemon, sampling};
 use std::env;
 use std::ffi::OsString;
@@ -199,17 +199,24 @@ fn terminal_text(text: &str) -> String {
         .collect()
 }
 
+fn table_value(value: Option<f64>, unit: Option<&str>) -> String {
+    match (value, unit) {
+        (Some(value), Some("°C")) => format!("{value:.1} °C"),
+        (Some(value), Some("V")) => format!("{value:.3} V"),
+        (Some(value), Some(unit @ ("RPM" | "MHz" | "%"))) => format!("{value:.0} {unit}"),
+        (Some(value), Some("B")) => format!("{:.2} MiB", value / 1_048_576.0),
+        (Some(value), Some("W")) => format!("{value:.3} W"),
+        (Some(value), Some("P-state")) => format!("P{value:.0}"),
+        _ => "—".to_owned(),
+    }
+}
+
 fn write_table(out: &mut impl Write, snapshot: &Snapshot) -> io::Result<()> {
     let rows: Vec<_> = snapshot
         .sensors
         .iter()
         .map(|sensor| {
-            let value = match (sensor.value, sensor.unit) {
-                (Some(value), Some("°C")) => format!("{value:.1} °C"),
-                (Some(value), Some("V")) => format!("{value:.3} V"),
-                (Some(value), Some("RPM")) => format!("{value:.0} RPM"),
-                _ => "—".to_owned(),
-            };
+            let value = table_value(sensor.value, sensor.unit);
             (
                 terminal_text(&sensor.device),
                 terminal_text(sensor.label.as_deref().unwrap_or(&sensor.attribute)),
@@ -439,7 +446,7 @@ fn run() -> io::Result<ExitCode> {
         }
         Command::Sensors { json, root } => {
             let mut out = io::stdout().lock();
-            match hwmon::scan(&root) {
+            match siliconwatch::scan(&root) {
                 Ok(snapshot) if json => match serde_json::to_vec_pretty(&snapshot) {
                     // Buffer serialization so an unencodable path cannot leave partial JSON.
                     Ok(bytes) => {
@@ -493,6 +500,20 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn table_formats_gpu_metrics_and_keeps_unavailable_values_empty() {
+        for (value, unit, expected) in [
+            (7.0, "%", "7 %"),
+            (1_572_864.0, "B", "1.50 MiB"),
+            (734.0, "MHz", "734 MHz"),
+            (32.75, "W", "32.750 W"),
+            (3.0, "P-state", "P3"),
+        ] {
+            assert_eq!(super::table_value(Some(value), Some(unit)), expected);
+            assert_eq!(super::table_value(None, Some(unit)), "—");
+        }
+    }
+
     use super::*;
 
     #[test]

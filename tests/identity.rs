@@ -365,7 +365,7 @@ fn denied_anchor_is_explicit_when_permissions_are_enforced() {
     fs::remove_file(&link).unwrap();
     symlink(blocked.join("anchor"), &link).unwrap();
     let permissions = fs::metadata(&blocked).unwrap().permissions();
-    fs::set_permissions(&blocked, fs::Permissions::from_mode(0)).unwrap();
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
     if fs::canonicalize(&link).is_ok() {
         fs::set_permissions(&blocked, permissions).unwrap();
         eprintln!("Skipping denied-anchor assertion: this user can traverse mode-000 directories.");

@@ -1,4 +1,5 @@
 use super::*;
+use crate::hwmon;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::fs;

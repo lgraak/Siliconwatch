@@ -10,7 +10,7 @@
 //! size. Hardware age is unknown. After known suspend, stop this cache and create
 //! another; `Instant` does not promise suspend-aware elapsed time.
 
-use crate::hwmon::{self, Snapshot};
+use crate::hwmon::Snapshot;
 use std::fmt;
 use std::io;
 use std::path::PathBuf;
@@ -299,7 +299,7 @@ impl CacheOwner {
             &mut SystemClock {
                 origin: self.shared.origin,
             },
-            || hwmon::scan(&root),
+            || crate::scan(&root),
         )
     }
 
