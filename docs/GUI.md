@@ -71,7 +71,7 @@ Choose **Reset Statistics**, review the confirmation, and confirm to clear sessi
 
 Double-click a sensor, select it and press **Enter**, or use **Open Details**. A single reusable native Details window shows all readings confidently associated with that current source registration. Opening another sensor explicitly retargets it.
 
-Temperature, voltage and fan categories appear only when the API supplies those readings. Other or unsupported rows remain visible. The window shares the main window's observation and statistics; it does not create another API client or accumulator.
+Details groups recognized readings into temperatures, voltages, fans, utilization, memory, clocks, power and performance state. Empty categories are omitted. Unavailable readings retain their category, and unrecognized measurements appear under Other / unsupported. The window shares the main window's observation and statistics; it does not create another API client or accumulator.
 
 Select a reading to inspect its raw text, exact raw integer, canonical/display value, source evidence, identity issues, diagnostics and observation timing. These are selectable text. Source paths are evidence, not links to acquire hardware or authorize actions. The current API has no verified physical-device inventory or cross-provider component graph, so titles use source names rather than guessed component associations.
 
@@ -125,22 +125,31 @@ A relative XDG path is ignored with a warning. If the configuration location is 
 
 Profiles use TOML with required `schema_version = 1` and `profile_kind = "siliconwatch.gui"`. Missing known settings take defaults; import replaces the whole preference set rather than merging selected fields. Unknown fields, unsupported versions, invalid types/ranges, malformed identities and invalid syntax reject the entire import. Maximum size is 256 KiB inclusive, UTF-8 only, with bounded structural nesting. Files must be regular local files; symlinks and special files are rejected.
 
-Profiles contain GUI appearance, layout, and close-window behavior only. They do not store raw observations, session statistics, diagnostic logs, credentials, API tokens, endpoint identifiers, polling cadence, socket permissions, access policy or hardware controls. Per-sensor colors, custom labels, hidden sensors and per-sensor unit overrides are deferred and rejected by schema 1.
+Profiles contain GUI appearance, layout, close-window behavior, the client API timeout, and requested daemon sampling and freshness timings. Applying monitoring preferences saves the request locally. The running daemon continues using its startup options. Per-sensor colors, custom labels, hidden sensors and per-sensor unit overrides are deferred and rejected by schema 1.
 
-The backward-compatible schema-1 addition is:
+Schema-1 profiles accept the optional behavior and monitoring sections shown below.
 
 ```toml
 [behavior]
 minimize_to_tray = false
+
+[monitoring]
+interval_ms = 1000
+stale_after_ms = 3000
+response_timeout_ms = 5000
 ```
 
-Existing valid profiles without this table or field retain the default close-to-exit behavior. The field accepts only a TOML boolean; strings, numbers, unknown behavior fields, and duplicate fields reject the entire candidate. No schema migration or reinterpretation of old values is needed. Export always includes the current behavior. Earlier GUI binaries with the strict original schema cannot import this newly extended profile without removing the new table; backward readability by this version does not promise forward readability by older binaries.
+Missing sections use the defaults shown above, so this GUI can load existing
+Alpha 1 profiles. Saving or exporting with this GUI writes `[monitoring]`.
+The Alpha 1 GUI rejects that unknown section. For side-by-side use, keep a
+separate `XDG_CONFIG_HOME` for the development GUI or retain an Alpha 1
+profile for use with the older binary.
 
 ### Export
 
 1. Open **Settings → Import, Export & Recovery**.
 2. Enter the full absolute destination path, including the filename, for example `/chosen/directory/siliconwatch-settings.toml`. The destination directory must already exist and be safe for writing. There is no native filesystem picker in this release.
-3. Leave **Include device group preferences in export** off for an appearance-only profile. Enable it only if you want to include source identity selectors, which can reveal hardware topology.
+3. Leave **Include device group preferences in export** off for a profile with global preferences only. Enable it only if you want to include source identity selectors, which can reveal hardware topology.
 4. Choose **Export Settings…**, review the destination and replacement notice, then confirm or cancel.
 
 Export uses the validated preferences held when the preview was prepared. Replacing an existing file requires the displayed confirmation; a changed destination is rejected for a new review. Export cannot replace the active configuration or its backup, and it does not alter active settings.
@@ -148,7 +157,7 @@ Export uses the validated preferences held when the preview was prepared. Replac
 ### Import
 
 1. Enter the full absolute path of a local profile under **Import, Export & Recovery** and choose **Import Settings…**.
-2. Review the validated incoming appearance/layout/close behavior, defaults, and pending device-group records. Invalid input shows an error and applies nothing.
+2. Review the validated incoming appearance, layout, close behavior and monitoring settings, defaults, and pending device-group records. Invalid input shows an error and applies nothing.
 3. Confirm replacement or cancel. File selection and preview alone do not apply settings.
 
 The preview holds the parsed candidate; editing the source file after preview cannot substitute different settings at confirmation. A successful save commits the whole profile before applying it to the GUI. A failure before commit leaves active settings and the previous configuration intact.
@@ -157,9 +166,9 @@ The preview holds the parsed candidate; editing the source file after preview ca
 
 Device selectors use existing SiliconWatch best-effort sensor identities, not labels or enumeration order. Those identities are not durable physical-hardware UUIDs: the same topology and channel can recur after hardware replacement or driver changes.
 
-Saved/imported device-group overrides therefore start pending. While they are pending, groups remain expanded for inspection. With a recent live source inventory, choose **Review Device Group Matches…** to review proposed matches. Every anchor must resolve uniquely to the same source registration with consistent evidence. Missing, conflicting or ambiguous mappings stay inactive; they are never attached to the nearest-looking sensor. Offline imports apply global appearance only and keep device records pending.
+Saved/imported device-group overrides therefore start pending. While they are pending, groups remain expanded for inspection. With a recent live source inventory, choose **Review Device Group Matches…** to review proposed matches. Every anchor must resolve uniquely to the same source registration with consistent evidence. Missing, conflicting or ambiguous mappings stay inactive; they are never attached to the nearest-looking sensor. Offline imports apply global preferences and keep device records pending.
 
-A changed daemon/source inventory requires fresh review. You can still expand or collapse an actual displayed group directly. Groups without suitable unique identities have session-only layout changes. No imported “trusted” flag bypasses this review.
+A changed daemon/source inventory requires fresh review. You can still expand or collapse an actual displayed group directly. Groups without suitable unique identities have session-only layout changes. Schema-1 portable group selectors support hwmon anchors. NVML group expansion is local to the current session. No imported “trusted” flag bypasses this review.
 
 ### Reset, conflict and recovery
 
@@ -177,6 +186,35 @@ If another editor or GUI changed the file, the write is rejected rather than ove
 
 The GUI consumes only `get_info` and `get_snapshot`. It performs no sensor acquisition, daemon supervision, fan/pump control, calibration, protective action, remote access or permission changes. It neither grants nor imports authority to change hardware.
 
-Available measurements remain those supplied by the existing backend: supported hwmon temperatures, voltages and fan speeds, with source-dependent coverage and explicit errors. There is no persistent history, graph engine, dashboard builder, physical-component relationship database or guarantee that every acquisition reaches the GUI.
+The backend supplies hwmon temperatures, voltages and fan speeds, plus the GPU metrics supported by the installed NVIDIA driver. There is no persistent history, graph engine, dashboard builder, physical-component relationship database or guarantee that every acquisition reaches the GUI.
 
 Only one Details window is reused. Grouped-list accessibility is application-defined rather than a claim of native table-cell semantics. Native backend, screen-reader, scaling and performance evidence—and any outstanding defects—belong in the [milestone report](milestones/010-native-gui.md). Prototype 010 technical acceptance remains Chris's decision.
+
+## Monitoring settings
+
+Settings → Monitoring accepts milliseconds and shows their equivalents in
+seconds. The default request is 1,000 ms sampling with a 3,000 ms stale
+threshold. The GUI accepts sampling from 100 to 60,000 ms and a stale
+threshold from the sampling interval to 600,000 ms. These are GUI validation
+limits. The daemon's existing CLI requires a positive stale threshold and
+accepts values shorter than the interval.
+
+Apply Preferences saves the requests in the versioned GUI TOML. Compare
+the saved request with the startup timings reported by the connected daemon instance. A mismatch
+is pending until you restart the daemon with the selectable launch command.
+When testing a development build, use the path to that build in place of
+`siliconwatch` in the command. Supply any additional daemon launch flags
+your setup requires. An older daemon may omit effective timings.
+
+The GUI API timeout defaults to 5,000 ms and accepts 100 to 60,000 ms.
+It applies to each new API transaction after saving, including connect,
+request, response, and validation. The timeout runs on the client worker.
+The existing server deadlines and GUI refresh cadence are independent.
+Reset Monitoring to Defaults restores the draft controls. Apply Preferences
+saves the reset.
+
+NVML clocks, fan speed, utilization, temperature, power, and memory can contribute to
+session statistics when samples meet the existing freshness and quality rules.
+The GUI displays VRAM in MiB and keeps raw bytes in the acquisition record.
+Performance state is a categorical current reading. Unsupported metrics
+display as unavailable through the usual per-row status and diagnostics.

@@ -29,6 +29,39 @@ pub(crate) fn sample_value(sequence: u64) -> Value {
 fn row(v: &mut Value) -> &mut Value {
     &mut v["result"]["observation"]["snapshot"]["sensors"][0]
 }
+
+#[test]
+fn monitoring_extension_decodes_only_known_versions() {
+    let mut v = info_value();
+    assert!(parse_info(&frame(&v)).unwrap().info.monitoring.is_none());
+    v["result"]["monitoring"] =
+        json!({"schema_version":1,"interval_ms":6000,"stale_after_ms":15000});
+    let config = parse_info(&frame(&v)).unwrap().info.monitoring.unwrap();
+    assert_eq!((config.interval_ms, config.stale_after_ms), (6000, 15000));
+
+    for version in [2, 256] {
+        v["result"]["monitoring"] = json!({"schema_version":version,"other_unit":"seconds"});
+        assert!(parse_info(&frame(&v)).unwrap().info.monitoring.is_none());
+    }
+    v["result"]["read_only"] = json!(false);
+    assert!(parse_info(&frame(&v)).is_err());
+}
+
+#[test]
+fn malformed_monitoring_metadata_is_rejected() {
+    let mut v = info_value();
+    for metadata in [
+        Value::Null,
+        json!({"schema_version":"1"}),
+        json!({"schema_version":1}),
+        json!({"schema_version":1,"interval_ms":99,"stale_after_ms":1}),
+        json!({"schema_version":1,"interval_ms":6000,"stale_after_ms":0}),
+    ] {
+        v["result"]["monitoring"] = metadata;
+        assert!(parse_info(&frame(&v)).is_err());
+    }
+}
+
 #[test]
 fn parses_lossless_limits_and_metadata() {
     assert_eq!(

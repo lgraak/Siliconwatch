@@ -127,6 +127,7 @@ impl SessionStatistics {
         for sensor in sensors {
             let key = RowKey::of(sensor);
             let ambiguous = counts[&key] != 1
+                || (key.provider.as_deref() == Some("nvml") && sensor.identity.candidate.is_none())
                 || matches!(
                     sensor.identity.status.as_str(),
                     "collision" | "ambiguous_channel" | "conflicting_evidence"
@@ -156,7 +157,10 @@ impl SessionStatistics {
                 entry.aggregate = None;
                 entry.ambiguous = false;
             }
-            if !eligible || sensor.status != "ok" || supported_unit(sensor).is_none() {
+            if !eligible
+                || sensor.status != "ok"
+                || matches!(supported_unit(sensor), None | Some("P-state"))
+            {
                 continue;
             }
             if entry.failed {
@@ -220,6 +224,36 @@ mod publication_tests {
     fn sensor(s: &SnapshotResponse) -> &Sensor {
         &s.assessment.observation.as_ref().unwrap().snapshot.sensors[0]
     }
+    #[test]
+    fn nvml_memory_statistics_restart_when_query_semantics_change() {
+        let mut stats = SessionStatistics::default();
+        for (sequence, measurement, value, count) in [
+            (1, "nvml_memory_used_v2_bytes", 100.0, 1),
+            (2, "nvml_memory_used_v2_bytes", 100.0, 2),
+            (3, "nvml_memory_used_legacy_bytes", 150.0, 1),
+            (4, "nvml_memory_used_v2_bytes", 100.0, 1),
+        ] {
+            let mut publication = snapshot(sequence, value);
+            let row = &mut publication
+                .assessment
+                .observation
+                .as_mut()
+                .unwrap()
+                .snapshot
+                .sensors[0];
+            row.attribute = "memory_used".into();
+            row.unit = Some("B".into());
+            row.identity.evidence.provider = Some("nvml".into());
+            row.identity.evidence.measurement = Some(measurement.into());
+            row.identity.candidate = Some(format!("fixture-{measurement}"));
+
+            stats.observe(&publication, true);
+            let aggregate = stats.aggregate(sensor(&publication)).unwrap();
+            assert_eq!(aggregate.count, count);
+            assert_eq!(aggregate.average, value);
+        }
+    }
+
     #[test]
     fn publications_deduplicate_and_reset_keeps_the_watermark() {
         let mut stats = SessionStatistics::default();

@@ -178,6 +178,43 @@ fn cancel_and_drop_join_a_stalled_worker_without_waiting_for_transaction_deadlin
     drop(client);
     assert!(start.elapsed() < Duration::from_secs(1));
 }
+
+#[test]
+fn saved_timeout_applies_to_the_next_request_on_the_existing_worker() {
+    let (release_info, wait_for_update) = std::sync::mpsc::channel();
+    let server = Server::new(move |method| {
+        if method == "get_info" {
+            wait_for_update
+                .recv_timeout(Duration::from_secs(3))
+                .unwrap();
+            normal(method)
+        } else {
+            Reply::Stall
+        }
+    });
+    let p = Policy {
+        transaction: Duration::from_secs(30),
+        transport: Duration::from_secs(30),
+        ..policy()
+    };
+    let client = ClientHandle::start(Some(server.root.clone()), p, || {}).unwrap();
+    until(|| server.methods() == ["get_info"]);
+    // Gate the handshake reply so the snapshot definitely starts after the settings change.
+    client.set_response_timeout(100);
+    release_info.send(()).unwrap();
+    until(|| {
+        matches!(
+            client.take_update(),
+            Some(ClientEvent::State { kind: ConnectionState::Disconnected, message })
+                if message.contains("deadline expired")
+        )
+    });
+    assert_eq!(server.methods(), ["get_info", "get_snapshot"]);
+    let start = Instant::now();
+    client.join().unwrap();
+    assert!(start.elapsed() < Duration::from_secs(1));
+}
+
 #[test]
 fn incomplete_eof_and_deadline_do_not_produce_a_snapshot() {
     for response in [
@@ -247,8 +284,8 @@ fn missing_runtime_configuration_is_nonretryable_until_explicit_reconnect() {
         )
     });
     client.join().unwrap();
-    assert!(ClientHandle::spawn(999, || {}).is_err());
-    assert!(ClientHandle::spawn(60001, || {}).is_err());
+    assert!(ClientHandle::spawn(999, 5000, || {}).is_err());
+    assert!(ClientHandle::spawn(60001, 5000, || {}).is_err());
 }
 #[test]
 fn service_unavailable_same_instance_cannot_be_bypassed_by_automatic_rehandshake() {
@@ -360,6 +397,7 @@ fn notification_mailbox_coalesces_and_rearms_after_consumption() {
     let count = Arc::new(AtomicUsize::new(0));
     let notified = Arc::clone(&count);
     let shared = Shared {
+        transaction_ms: AtomicU64::new(5000),
         stop: AtomicBool::new(false),
         reconnect: AtomicBool::new(false),
         mailbox: Mutex::new(None),

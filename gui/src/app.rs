@@ -3,7 +3,7 @@ use crate::client::{ClientEvent, ClientHandle, ConnectionState};
 use crate::lifecycle::{Action, Event, Lifecycle, Windows};
 use crate::model::{FreshnessState, GroupKey, SensorModel, SourceStamp, VisibleRow, match_group};
 use crate::preferences::*;
-use crate::presentation::{reading, supported_unit, visible};
+use crate::presentation::{detail_categories, reading, supported_unit, visible};
 use crate::tray::{TrayAction, TrayHandle, TrayIcon};
 use crate::ui::{ColumnSpec, DetailsWindow, MainWindow, SensorRow, SettingsWindow};
 use slint::{ComponentHandle, Model, ModelRc, Timer, TimerMode, VecModel};
@@ -33,6 +33,7 @@ pub struct Application {
     pub model: SensorModel,
     pub preferences: Preferences,
     draft: Preferences,
+    effective_monitoring: Option<crate::protocol::EffectiveMonitoring>,
     rows: Rc<VecModel<SensorRow>>,
     details_rows: Rc<VecModel<SensorRow>>,
     details_indices: Vec<Option<usize>>,
@@ -135,6 +136,7 @@ impl Application {
             recovery,
             reload_review_required: false,
             closing: false,
+            effective_monitoring: None,
             known_groups: BTreeSet::new(),
             fonts,
             font_notice: String::new(),
@@ -153,7 +155,8 @@ impl Application {
                 }
             });
         let ui = app.borrow().main.as_weak();
-        let client = ClientHandle::spawn(refresh_ms, move || {
+        let timeout_ms = app.borrow().preferences.monitoring.response_timeout_ms;
+        let client = ClientHandle::spawn(refresh_ms, timeout_ms, move || {
             let _ = ui.upgrade_in_event_loop(|ui| ui.invoke_worker_wakeup());
         })?;
         {
@@ -221,6 +224,7 @@ impl Application {
         callback!(settings,on_import_settings, => |a:&mut Self|{let p=PathBuf::from(a.settings.get_path().as_str());a.submit(ConfigJob::Import(p),Saving::None);});
         callback!(settings,on_export_settings, => |a:&mut Self|{let p=PathBuf::from(a.settings.get_path().as_str());a.submit(ConfigJob::PrepareExport{path:p,preferences:a.preferences.clone(),include_groups:a.settings.get_include_groups()},Saving::None);});
         callback!(settings,on_restore_backup, => |a:&mut Self|{a.submit(ConfigJob::ReadBackup,Saving::None);});
+        callback!(settings,on_reset_monitoring, => |a:&mut Self|a.populate_monitoring(&Monitoring::default()));
         callback!(settings,on_reset_defaults, => |a:&mut Self|a.preview_preferences(Preferences::default()));
         callback!(settings,on_review_groups, => |a:&mut Self|a.review_groups());
         callback!(settings,on_confirm, => |a:&mut Self|a.confirm());
@@ -258,6 +262,7 @@ impl Application {
         if let Some(event) = self.client.as_ref().and_then(ClientHandle::take_update) {
             match event {
                 ClientEvent::State { kind, message } => {
+                    self.effective_monitoring = None;
                     self.connection_status = if matches!(kind, ConnectionState::Connecting) {
                         "Reconnecting"
                     } else {
@@ -266,9 +271,11 @@ impl Application {
                     self.model.disconnect(message);
                 }
                 ClientEvent::Snapshot(snapshot) => {
+                    let monitoring = snapshot.monitoring.clone();
                     match self.model.accept(*snapshot, Instant::now()) {
                         Ok(changed) => {
                             self.connection_status = "Connected";
+                            self.effective_monitoring = monitoring;
                             let groups: BTreeSet<_> = self.model.groups().into_keys().collect();
                             if changed {
                                 // Source changes invalidate reviewed associations; saved records remain pending.
@@ -288,6 +295,7 @@ impl Application {
                         }
                         Err(message) => {
                             self.connection_status = "Disconnected";
+                            self.effective_monitoring = None;
                             self.model.disconnect(message);
                         }
                     }
@@ -297,6 +305,7 @@ impl Application {
         }
     }
     pub fn render(&mut self) {
+        self.render_monitoring();
         let now = Instant::now();
         if let Some(tray) = &self.tray {
             tray.update_status(self.connection_status, self.model.freshness(now).label());
@@ -305,10 +314,7 @@ impl Application {
         let groups = self.model.groups();
         let mut rows = Vec::new();
         for (g, indices) in &groups {
-            let title = group_title(
-                g,
-                indices.first().and_then(|i| self.model.sensors().get(*i)),
-            );
+            let title = g.title(indices.first().and_then(|i| self.model.sensors().get(*i)));
             let expanded = !self.model.collapsed.contains(g);
             rows.push(SensorRow {
                 label: title.clone().into(),
@@ -474,25 +480,13 @@ impl Application {
         };
         let group = GroupKey::of(&self.model.sensors()[index]);
         let groups = self.model.groups();
-        let indices = groups.get(&group).cloned().unwrap_or_default();
+        let indices = &groups[&group];
         self.details
-            .set_device_title(group_title(&group, self.model.sensors().get(index)).into());
+            .set_device_title(group.title(self.model.sensors().get(index)).into());
         let mut rows = Vec::new();
         let mut mapping = Vec::new();
-        for (category, unit) in [
-            ("Temperatures", Some("°C")),
-            ("Voltages", Some("V")),
-            ("Fans", Some("RPM")),
-            ("Other / unsupported", None),
-        ] {
-            let members: Vec<_> = indices
-                .iter()
-                .copied()
-                .filter(|i| supported_unit(&self.model.sensors()[*i]) == unit)
-                .collect();
-            if members.is_empty() {
-                continue;
-            }
+        for (category, members) in detail_categories(self.model.sensors(), indices) {
+            let category = category.label();
             rows.push(SensorRow {
                 label: category.into(),
                 spoken: format!("{category}, category").into(),
@@ -677,6 +671,7 @@ impl Application {
     fn populate_settings(&self) {
         let p = &self.draft;
         let s = &self.settings;
+        self.populate_monitoring(&p.monitoring);
         s.set_minimize_to_tray(p.behavior.minimize_to_tray);
         s.set_theme_index(theme_index(p.appearance.theme));
         s.set_font_family(p.appearance.font_family.clone().into());
@@ -697,6 +692,36 @@ impl Application {
         s.set_default_expanded(p.table.default_expanded);
         self.set_draft_columns();
     }
+    fn populate_monitoring(&self, monitoring: &Monitoring) {
+        self.settings.set_interval_ms(monitoring.interval_ms as i32);
+        self.settings
+            .set_stale_after_ms(monitoring.stale_after_ms as i32);
+        self.settings
+            .set_response_timeout_ms(monitoring.response_timeout_ms as i32);
+    }
+
+    fn render_monitoring(&self) {
+        let requested = &self.preferences.monitoring;
+        let text = match &self.effective_monitoring {
+            Some(effective) => {
+                let status = if u64::from(requested.interval_ms) == effective.interval_ms
+                    && u64::from(requested.stale_after_ms) == effective.stale_after_ms {
+                    "Saved request is active."
+                } else {
+                    "Saved request pending daemon restart."
+                };
+                format!("Effective daemon: {} ms sampling · {} ms stale threshold. {status}",
+                    effective.interval_ms, effective.stale_after_ms)
+            }
+            None => "Effective daemon settings unavailable. Restart with the saved command to apply timings.".into(),
+        };
+        self.settings.set_effective_monitoring(text.into());
+        self.settings
+            .set_monitoring_command(requested.command().into());
+        self.settings
+            .set_effective_timeout_ms(requested.response_timeout_ms as i32);
+    }
+
     fn set_draft_columns(&self) {
         self.settings
             .set_columns(ModelRc::new(VecModel::from(columns(&self.draft))));
@@ -714,6 +739,11 @@ impl Application {
         }
         let s = &self.settings;
         let mut p = self.draft.clone();
+        p.monitoring = Monitoring {
+            interval_ms: s.get_interval_ms().max(0) as u32,
+            stale_after_ms: s.get_stale_after_ms().max(0) as u32,
+            response_timeout_ms: s.get_response_timeout_ms().max(0) as u32,
+        };
         p.behavior.minimize_to_tray = s.get_minimize_to_tray();
         p.appearance.theme = match s.get_theme_index() {
             1 => Theme::Dark,
@@ -793,8 +823,8 @@ impl Application {
             }
         );
         let text = format!(
-            "{text}\n\nComplete incoming appearance and layout:\n{:#?}\n{:#?}\n{:#?}\nMissing fonts use the system fallback; requested font and window sizes remain portable.",
-            p.appearance, p.windows, p.table
+            "{text}\n\nIncoming monitoring settings (ms): {:?}\n\nComplete incoming appearance and layout:\n{:#?}\n{:#?}\n{:#?}\nMissing fonts use the system fallback; requested font and window sizes remain portable.",
+            p.monitoring, p.appearance, p.windows, p.table
         );
         self.set_preview(Preview::Preferences(p), text);
     }
@@ -1050,6 +1080,11 @@ impl Application {
                 ) {
                     Ok(outcome) => {
                         self.recovery = false;
+                        if let Some(client) = &self.client {
+                            client.set_response_timeout(
+                                self.preferences.monitoring.response_timeout_ms,
+                            );
+                        }
                         if outcome.replaced {
                             self.draft = self.preferences.clone();
                             self.model.collapsed.clear();
@@ -1214,6 +1249,7 @@ impl Application {
             c.reconnect();
         }
         self.connection_status = "Reconnecting";
+        self.effective_monitoring = None;
         self.model.disconnect("Reconnecting…".into());
         self.render();
     }
@@ -1329,17 +1365,6 @@ fn theme_index(t: Theme) -> i32 {
         Theme::Dark => 1,
         Theme::Light => 2,
     }
-}
-fn group_title(group: &GroupKey, sensor: Option<&crate::protocol::Sensor>) -> String {
-    visible(&format!(
-        "{} · {}",
-        group
-            .provider
-            .as_deref()
-            .or(sensor.map(|s| s.device.as_str()))
-            .unwrap_or("Unknown source"),
-        group.path.rsplit('/').next().unwrap_or("source")
-    ))
 }
 fn update_rows(model: &VecModel<SensorRow>, rows: Vec<SensorRow>) {
     if model.row_count() != rows.len() {

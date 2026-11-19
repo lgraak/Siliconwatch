@@ -3,7 +3,7 @@ use crate::protocol::{self, Attempt, ProtocolError, SnapshotResponse};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -13,6 +13,7 @@ mod os;
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimedSnapshot {
     pub snapshot: SnapshotResponse,
+    pub monitoring: Option<protocol::EffectiveMonitoring>,
     pub request_started: Instant,
     pub response_received: Instant,
 }
@@ -34,6 +35,7 @@ pub enum ClientEvent {
 }
 struct Shared {
     stop: AtomicBool,
+    transaction_ms: AtomicU64,
     reconnect: AtomicBool,
     mailbox: Mutex<Option<ClientEvent>>,
     wake: Condvar,
@@ -117,8 +119,13 @@ pub struct ClientHandle {
     worker: Option<JoinHandle<()>>,
 }
 impl ClientHandle {
-    pub fn spawn(refresh_ms: u64, notify: impl Fn() + Send + Sync + 'static) -> io::Result<Self> {
-        let policy = Policy::normal(refresh_ms)?;
+    pub fn spawn(
+        refresh_ms: u64,
+        timeout_ms: u32,
+        notify: impl Fn() + Send + Sync + 'static,
+    ) -> io::Result<Self> {
+        let mut policy = Policy::normal(refresh_ms)?;
+        policy.transaction = Duration::from_millis(u64::from(timeout_ms));
         let root = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
         Self::start(root, policy, notify)
     }
@@ -129,6 +136,7 @@ impl ClientHandle {
     ) -> io::Result<Self> {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
+            transaction_ms: AtomicU64::new(policy.transaction.as_millis() as u64),
             reconnect: AtomicBool::new(false),
             mailbox: Mutex::new(None),
             wake: Condvar::new(),
@@ -144,6 +152,12 @@ impl ClientHandle {
             worker: Some(worker),
         })
     }
+    pub fn set_response_timeout(&self, timeout_ms: u32) {
+        self.shared
+            .transaction_ms
+            .store(u64::from(timeout_ms), Ordering::Release);
+    }
+
     pub fn take_update(&self) -> Option<ClientEvent> {
         self.shared
             .mailbox
@@ -328,6 +342,7 @@ impl SequenceGuard {
 }
 fn run(root: Option<PathBuf>, policy: Policy, shared: Arc<Shared>) {
     let mut expected: Option<String> = None;
+    let mut monitoring = None;
     let mut blocked_instance: Option<String> = None;
     let mut require_explicit = false;
     let mut due = Instant::now();
@@ -359,8 +374,10 @@ fn run(root: Option<PathBuf>, policy: Policy, shared: Arc<Shared>) {
                     "XDG_RUNTIME_DIR is missing; start from the correct desktop user session",
                 )
             })?;
+            let transaction =
+                || Duration::from_millis(shared.transaction_ms.load(Ordering::Acquire));
             if expected.is_none() {
-                let f = request(root, "get_info", policy.transaction, &shared.stop)?;
+                let f = request(root, "get_info", transaction(), &shared.stop)?;
                 let info = protocol::parse_info(&f.bytes)?;
                 os::check(f.deadline, &shared.stop)?;
                 if blocked_instance.as_deref() == Some(&info.instance_id) {
@@ -368,8 +385,9 @@ fn run(root: Option<PathBuf>, policy: Policy, shared: Arc<Shared>) {
                 }
                 blocked_instance = None;
                 expected = Some(info.instance_id);
+                monitoring = info.info.monitoring;
             }
-            let f = request(root, "get_snapshot", policy.transaction, &shared.stop)?;
+            let f = request(root, "get_snapshot", transaction(), &shared.stop)?;
             let snapshot = protocol::parse_snapshot(&f.bytes)?;
             os::check(f.deadline, &shared.stop)?;
             if expected.as_deref() != Some(&snapshot.instance_id) {
@@ -383,6 +401,7 @@ fn run(root: Option<PathBuf>, policy: Policy, shared: Arc<Shared>) {
             sequences.accept(&snapshot)?;
             Ok(Some(TimedSnapshot {
                 snapshot,
+                monitoring: monitoring.clone(),
                 request_started: f.started,
                 response_received: f.received,
             }))

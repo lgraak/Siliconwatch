@@ -227,7 +227,16 @@ impl Endpoint {
                 "local API socket path is too long",
             ));
         }
-        DirBuilder::new().mode(0o700).create(&directory)?;
+        DirBuilder::new().mode(0o700).create(&directory).map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                io::Error::new(error.kind(), format!(
+                    "local API endpoint is occupied at {} (another daemon or an existing runtime directory)",
+                    socket.display()
+                ))
+            } else {
+                error
+            }
+        })?;
         let metadata = fs::symlink_metadata(&directory)?;
         if !metadata.is_dir() || metadata.uid() != uid {
             return Err(denied(

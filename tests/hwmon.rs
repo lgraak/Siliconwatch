@@ -214,7 +214,7 @@ fn permission_denied_is_distinct_when_enforced_for_this_user() {
     f.write("hwmon0/name", "fixture\n");
     f.write("hwmon0/temp1_input", "42000\n");
     let input = f.root.join("hwmon0/temp1_input");
-    fs::set_permissions(&input, fs::Permissions::from_mode(0)).unwrap();
+    fs::set_permissions(&input, fs::Permissions::from_mode(0o000)).unwrap();
     if fs::read_to_string(&input).is_ok() {
         eprintln!("Skipping permission assertion: this user can read mode-000 files.");
         return;

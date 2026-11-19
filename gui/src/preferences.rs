@@ -78,6 +78,8 @@ pub struct Preferences {
     #[serde(default)]
     pub behavior: Behavior,
     #[serde(default)]
+    pub monitoring: Monitoring,
+    #[serde(default)]
     pub appearance: Appearance,
     #[serde(default)]
     pub windows: Windows,
@@ -92,6 +94,7 @@ impl Default for Preferences {
             schema_version: 1,
             profile_kind: KIND.into(),
             behavior: Behavior::default(),
+            monitoring: Monitoring::default(),
             appearance: Appearance::default(),
             windows: Windows::default(),
             table: Table::default(),
@@ -99,6 +102,34 @@ impl Default for Preferences {
         }
     }
 }
+/// Requested daemon settings and the local client's whole-transaction budget.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Monitoring {
+    pub interval_ms: u32,
+    pub stale_after_ms: u32,
+    pub response_timeout_ms: u32,
+}
+
+impl Default for Monitoring {
+    fn default() -> Self {
+        Self {
+            interval_ms: 1_000,
+            stale_after_ms: 3_000,
+            response_timeout_ms: 5_000,
+        }
+    }
+}
+
+impl Monitoring {
+    pub fn command(&self) -> String {
+        format!(
+            "siliconwatch daemon --local-api --interval-ms {} --stale-after-ms {}",
+            self.interval_ms, self.stale_after_ms
+        )
+    }
+}
+
 /// Optional schema-1 GUI behavior. Older profiles retain close-to-exit behavior.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -277,6 +308,29 @@ impl Preferences {
         }
         if self.profile_kind != KIND {
             return Err(invalid("profile_kind"));
+        }
+        range(
+            self.monitoring.interval_ms,
+            100,
+            60_000,
+            "Monitoring sampling interval (ms)",
+        )?;
+        range(
+            self.monitoring.stale_after_ms,
+            100,
+            600_000,
+            "Monitoring stale threshold (ms)",
+        )?;
+        range(
+            self.monitoring.response_timeout_ms,
+            100,
+            60_000,
+            "Monitoring API response timeout (ms)",
+        )?;
+        if self.monitoring.stale_after_ms < self.monitoring.interval_ms {
+            return Err(invalid(
+                "Monitoring stale threshold must be at least the sampling interval",
+            ));
         }
         let font = &self.appearance.font_family;
         if font.is_empty()

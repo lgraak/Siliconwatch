@@ -1,17 +1,83 @@
 //! Display conversions never mutate the acquisition record.
 use crate::preferences::TemperatureUnit;
 use crate::protocol::Sensor;
+use std::collections::BTreeMap;
 
-pub fn supported_unit(sensor: &Sensor) -> Option<&'static str> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Category {
+    Temperatures,
+    Voltages,
+    Fans,
+    Utilization,
+    Memory,
+    Clocks,
+    Power,
+    PerformanceState,
+    Other,
+}
+
+impl Category {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Temperatures => "Temperatures",
+            Self::Voltages => "Voltages",
+            Self::Fans => "Fans",
+            Self::Utilization => "Utilization",
+            Self::Memory => "Memory",
+            Self::Clocks => "Clocks",
+            Self::Power => "Power",
+            Self::PerformanceState => "Performance state",
+            Self::Other => "Other / unsupported",
+        }
+    }
+}
+
+fn measurement(sensor: &Sensor) -> (Category, Option<&'static str>) {
     match (
         sensor.identity.evidence.measurement.as_deref(),
         sensor.unit.as_deref(),
     ) {
-        (Some("temperature_input_millidegree_celsius"), Some("°C")) => Some("°C"),
-        (Some("voltage_input_millivolt"), Some("V")) => Some("V"),
-        (Some("fan_speed_input_rpm"), Some("RPM")) => Some("RPM"),
-        _ => None,
+        (
+            Some("temperature_input_millidegree_celsius" | "nvml_temperature_celsius"),
+            Some("°C"),
+        ) => (Category::Temperatures, Some("°C")),
+        (Some("voltage_input_millivolt"), Some("V")) => (Category::Voltages, Some("V")),
+        (Some("fan_speed_input_rpm"), Some("RPM")) => (Category::Fans, Some("RPM")),
+        (Some("nvml_fan_percent"), Some("%")) => (Category::Fans, Some("%")),
+        (Some("nvml_utilization_percent"), Some("%")) => (Category::Utilization, Some("%")),
+        (
+            Some(
+                "nvml_memory_bytes"
+                | "nvml_memory_total_legacy_bytes"
+                | "nvml_memory_reserved_v2_bytes"
+                | "nvml_memory_used_v2_bytes"
+                | "nvml_memory_used_legacy_bytes",
+            ),
+            Some("B"),
+        ) => (Category::Memory, Some("B")),
+        (Some("nvml_clock_mhz"), Some("MHz")) => (Category::Clocks, Some("MHz")),
+        (Some("nvml_power_milliwatts"), Some("W")) => (Category::Power, Some("W")),
+        (Some("nvml_performance_state"), Some("P-state")) => {
+            (Category::PerformanceState, Some("P-state"))
+        }
+        _ => (Category::Other, None),
     }
+}
+
+pub fn supported_unit(sensor: &Sensor) -> Option<&'static str> {
+    measurement(sensor).1
+}
+
+pub fn detail_categories(sensors: &[Sensor], indices: &[usize]) -> BTreeMap<Category, Vec<usize>> {
+    let mut categories = BTreeMap::new();
+    for &index in indices {
+        let (category, _) = measurement(&sensors[index]);
+        categories
+            .entry(category)
+            .or_insert_with(Vec::new)
+            .push(index);
+    }
+    categories
 }
 
 pub fn converted(
@@ -27,6 +93,11 @@ pub fn converted(
         ("°C", _) => (value, "°C"),
         ("V", _) => (value, "V"),
         ("RPM", _) => (value, "RPM"),
+        ("%", _) => (value, "%"),
+        ("B", _) => (value / 1_048_576.0, "MiB"),
+        ("MHz", _) => (value, "MHz"),
+        ("W", _) => (value, "W"),
+        ("P-state", _) => (value, "P-state"),
         _ => return None,
     };
     pair.0.is_finite().then_some(pair)
@@ -42,6 +113,9 @@ pub fn reading(value: Option<f64>, unit: Option<&str>, preference: TemperatureUn
     let Some((value, display_unit)) = converted(value, unit, preference) else {
         return "— (display error)".into();
     };
+    if unit == "P-state" {
+        return format!("P{value:.0}");
+    }
     let number = if value.abs() >= 1_000_000.0 {
         format!("{value:.4e}")
     } else if unit == "RPM" {
@@ -94,6 +168,51 @@ mod tests {
         assert!(converted(f64::NAN, "V", TemperatureUnit::Celsius).is_none());
         assert!(converted(1.0, "unknown", TemperatureUnit::Celsius).is_none());
     }
+    #[test]
+    fn details_categories_include_all_gpu_metrics_and_unknown_rows() {
+        use crate::protocol::parse_snapshot;
+        use crate::protocol::tests::{frame, sample_value};
+        let snapshot = parse_snapshot(&frame(&sample_value(1))).unwrap();
+        let mut rows = snapshot.assessment.observation.unwrap().snapshot.sensors;
+        let sensor = &mut rows[0];
+        // Unavailable metrics keep their category when their unit and semantics are known.
+        sensor.status = "unsupported".into();
+        sensor.value = None;
+        let mut samples = Vec::new();
+        for (semantics, unit, expected) in [
+            ("nvml_temperature_celsius", "°C", Category::Temperatures),
+            ("nvml_utilization_percent", "%", Category::Utilization),
+            ("nvml_fan_percent", "%", Category::Fans),
+            ("nvml_memory_bytes", "B", Category::Memory),
+            ("nvml_memory_total_legacy_bytes", "B", Category::Memory),
+            ("nvml_memory_used_v2_bytes", "B", Category::Memory),
+            ("nvml_memory_reserved_v2_bytes", "B", Category::Memory),
+            ("nvml_memory_used_legacy_bytes", "B", Category::Memory),
+            ("nvml_clock_mhz", "MHz", Category::Clocks),
+            ("nvml_power_milliwatts", "W", Category::Power),
+            (
+                "nvml_performance_state",
+                "P-state",
+                Category::PerformanceState,
+            ),
+        ] {
+            sensor.identity.evidence.measurement = Some(semantics.into());
+            sensor.unit = Some(unit.into());
+            assert_eq!(measurement(sensor), (expected, Some(unit)));
+            samples.push(sensor.clone());
+        }
+        sensor.unit = Some("unexpected".into());
+        assert_eq!(measurement(sensor), (Category::Other, None));
+        samples.push(sensor.clone());
+        let indices: Vec<_> = (0..samples.len()).rev().collect();
+        let categories = detail_categories(&samples, &indices);
+        assert_eq!(categories[&Category::Memory], [7, 6, 5, 4, 3]);
+        assert_eq!(categories[&Category::Other], [samples.len() - 1]);
+        let mut all: Vec<_> = categories.into_values().flatten().collect();
+        all.sort_unstable();
+        assert_eq!(all, (0..samples.len()).collect::<Vec<_>>());
+    }
+
     #[test]
     fn labels_do_not_hide_control_characters() {
         assert_eq!(visible("CPU\nA\u{202e}"), "CPU\\u{a}A\\u{202e}");

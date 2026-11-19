@@ -174,6 +174,8 @@ pub struct Limits {
 }
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Info {
+    #[serde(default, deserialize_with = "monitoring")]
+    pub monitoring: Option<EffectiveMonitoring>,
     pub supported_versions: Vec<u64>,
     pub methods: Vec<String>,
     pub snapshot_schema_version: u64,
@@ -181,6 +183,29 @@ pub struct Info {
     pub read_only: bool,
     pub limits: Limits,
 }
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct EffectiveMonitoring {
+    pub schema_version: u8,
+    pub interval_ms: u64,
+    pub stale_after_ms: u64,
+}
+
+fn monitoring<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EffectiveMonitoring>, D::Error> {
+    let value = Value::deserialize(d)?;
+    match value.get("schema_version").and_then(Value::as_u64) {
+        Some(1) => {
+            let config: EffectiveMonitoring =
+                serde_json::from_value(value).map_err(de::Error::custom)?;
+            if !(100..=60_000).contains(&config.interval_ms) || config.stale_after_ms == 0 {
+                return Err(de::Error::custom("invalid effective daemon timings"));
+            }
+            Ok(Some(config))
+        }
+        Some(2..) => Ok(None),
+        _ => Err(de::Error::custom("invalid monitoring schema version")),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct InfoResponse {
     pub instance_id: String,

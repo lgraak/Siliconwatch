@@ -51,6 +51,13 @@ export component SettingsWindow inherits Window {
     in-out property <int> selected-column: 0;
     in-out property <int> column-width-px: 440;
     in-out property <string> path;
+    in-out property <int> interval-ms: 1000;
+    in-out property <int> stale-after-ms: 3000;
+    in-out property <int> response-timeout-ms: 5000;
+    in property <string> effective-monitoring;
+    in property <string> monitoring-command;
+    in property <int> effective-timeout-ms: 5000;
+    callback reset-monitoring();
     in property <string> preview;
     in property <string> status;
     in-out property <bool> include-groups;
@@ -88,10 +95,10 @@ export component SettingsWindow inherits Window {
                 Rectangle { horizontal-stretch: 1; }
                 Button { text: "Close"; enabled: !root.busy; clicked => { root.close(); } }
             }
-            Text { text: "GUI preferences · Acquisition and security settings are unchanged"; color: Colors.secondary(root.theme-index); wrap: word-wrap; }
             HorizontalLayout {
                 spacing: 8px;
                 first-page := Button { text: "Appearance & Layout"; enabled: !root.confirming && !root.busy; clicked => { root.page = 0; } }
+                Button { text: "Monitoring"; enabled: !root.confirming && !root.busy; clicked => { root.page = 2; } }
                 Button { text: "Import, Export & Recovery"; enabled: !root.confirming && !root.busy; clicked => { root.page = 1; } }
             }
             if !root.status.is-empty: Text { text: root.status; color: Colors.caution(root.theme-index); wrap: word-wrap; }
@@ -166,6 +173,33 @@ export component SettingsWindow inherits Window {
                             SpinBox { value <=> root.column-width-px; minimum: root.columns[root.selected-column].index == 0 ? 240 : 112; maximum: root.columns[root.selected-column].index == 0 ? 1024 : 512; enabled: !root.busy; accessible-label: "Selected column width in logical pixels"; edited(value) => { root.column-width-changed(value); } }
                         }
                         Text { text: "All five columns remain available. Quality and freshness labels stay visible."; color: Colors.secondary(root.theme-index); wrap: word-wrap; }
+                    }
+                    if root.page == 2: VerticalLayout {
+                        spacing: 12px;
+                        Text { text: "Requested daemon timings"; color: Colors.text(root.theme-index); font-weight: 600; }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Text { text: "Sampling interval (ms)"; color: Colors.text(root.theme-index); }
+                            SpinBox { value <=> root.interval-ms; minimum: 100; maximum: 60000; enabled: !root.busy; accessible-label: "Sampling interval in milliseconds"; }
+                            Text { text: (root.interval-ms / 1000.0) + " s"; color: Colors.secondary(root.theme-index); }
+                        }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Text { text: "Stale threshold (ms)"; color: Colors.text(root.theme-index); }
+                            SpinBox { value <=> root.stale-after-ms; minimum: 100; maximum: 600000; enabled: !root.busy; accessible-label: "Stale threshold in milliseconds"; }
+                            Text { text: (root.stale-after-ms / 1000.0) + " s"; color: Colors.secondary(root.theme-index); }
+                        }
+                        Text { text: "Save the requested timings, then restart the daemon with the saved launch command."; color: Colors.secondary(root.theme-index); wrap: word-wrap; }
+                        Text { text: root.effective-monitoring; color: Colors.text(root.theme-index); wrap: word-wrap; }
+                        TextEdit { text: root.monitoring-command; read-only: true; min-height: 58px; accessible-label: "Saved daemon launch command. Select and copy."; }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Text { text: "API response timeout (ms)"; color: Colors.text(root.theme-index); }
+                            SpinBox { value <=> root.response-timeout-ms; minimum: 100; maximum: 60000; enabled: !root.busy; accessible-label: "API response timeout in milliseconds"; }
+                            Text { text: (root.response-timeout-ms / 1000.0) + " s"; color: Colors.secondary(root.theme-index); }
+                        }
+                        Text { text: "Effective GUI timeout: " + root.effective-timeout-ms + " ms. Changes apply to new requests after saving."; color: Colors.secondary(root.theme-index); wrap: word-wrap; }
+                        Button { text: "Reset Monitoring to Defaults"; enabled: !root.busy; clicked => { root.reset-monitoring(); } }
                     }
                     if root.page == 1: VerticalLayout {
                         spacing: 12px;

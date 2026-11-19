@@ -1,6 +1,6 @@
 //! Finite foreground scans. Timing describes userspace observation, not hardware age.
 
-use crate::hwmon::{self, Snapshot};
+use crate::hwmon::Snapshot;
 use serde::Serialize;
 use std::io::{self, Write};
 use std::path::Path;
@@ -142,7 +142,7 @@ pub fn run(
         &mut SystemClock {
             origin: Instant::now(),
         },
-        || hwmon::scan(root),
+        || crate::scan(root),
         emit,
     )
 }
