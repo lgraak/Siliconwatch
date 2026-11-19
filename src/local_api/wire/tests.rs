@@ -190,7 +190,7 @@ fn request_limit_includes_final_lf_and_accepts_exact_boundary() {
 #[test]
 fn info_and_error_records_have_explicit_versions_limits_and_retry_policy() {
     let cancelled = AtomicBool::new(false);
-    let value = decode(&info(INSTANCE, &budget(&cancelled)).unwrap());
+    let value = decode(&info(INSTANCE, &budget(&cancelled), None).unwrap());
     assert_eq!(value["api_version"], 1);
     assert_eq!(value["instance_id"], INSTANCE);
     assert_eq!(value["ok"], true);
@@ -610,12 +610,12 @@ fn escaping_expansion_is_capped_and_exact_encoded_boundary_includes_lf() {
 fn cancellation_and_expired_budgets_stop_preflight_and_encoding() {
     let cancelled = AtomicBool::new(true);
     assert_eq!(
-        info(INSTANCE, &budget(&cancelled)),
+        info(INSTANCE, &budget(&cancelled), None),
         Err(ApiError::Cancelled)
     );
     cancelled.store(false, Ordering::Release);
     let expired = Budget::new(Instant::now() - Duration::from_secs(1), &cancelled);
-    assert_eq!(info(INSTANCE, &expired), Err(ApiError::Deadline));
+    assert_eq!(info(INSTANCE, &expired, None), Err(ApiError::Deadline));
     let sample = sample_snapshot();
     let attempt = attempt(1);
     assert_eq!(
@@ -649,7 +649,7 @@ fn invalid_internal_epoch_or_lifecycle_is_never_published_as_healthy() {
         "ABCDEF0123456789abcdef0123456789ab",
     ] {
         assert_eq!(
-            info(instance, &budget(&cancelled)),
+            info(instance, &budget(&cancelled), None),
             Err(ApiError::ServiceUnavailable)
         );
     }

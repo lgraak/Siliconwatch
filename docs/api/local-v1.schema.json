@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/lgraak/Siliconwatch/main/docs/api/local-v1.schema.json",
   "title": "SiliconWatch experimental local API v1 messages",
-  "description": "Accepted requests and complete emitted responses, including embedded snapshot schema 2 and identity schema 1. All emitted object fields are required; nullable fields are never omitted. This strict emitter schema rejects additional properties; clients may tolerate additive response fields according to local-v1.md.",
+  "description": "Accepted requests and complete emitted responses, including embedded snapshot schema 2 and identity schema 1. Each object lists its required fields. An optional extension may be absent. Required nullable fields use explicit nulls. This strict emitter schema rejects additional properties; clients may tolerate additive response fields according to local-v1.md.",
   "$comment": "Validate parsed JSON after enforcing UTF-8, one LF-terminated frame, duplicate-key rejection and transport byte/deadline limits. JSON Schema cannot distinguish integer JSON spellings such as 1 and 1.0 after parsing, measure UTF-8 byte budgets, establish identity/permissions or verify timestamp arithmetic. The request parser additionally rejects floating-point version spellings. Decimal-string patterns bound unsigned integer ranges without binary64 narrowing. Nonfinite numbers are not protocol JSON. See local-v1.md for runtime and freshness semantics.",
   "oneOf": [
     {
@@ -212,7 +212,7 @@
         },
         "unit": {
           "$ref": "#/$defs/nullableText",
-          "description": "Canonical unit string or null. Current acquisition conversions use °C, RPM and V."
+          "description": "Canonical unit string or null. Current acquisition conversions use °C, RPM, V, %, B, MHz, W and P-state."
         },
         "status": {
           "enum": [
@@ -866,6 +866,16 @@
         },
         "read_only": {
           "const": true
+        },
+        "monitoring": {
+          "type": "object",
+          "properties": {
+            "schema_version": { "const": 1 },
+            "interval_ms": { "type": "integer", "minimum": 100, "maximum": 60000 },
+            "stale_after_ms": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+          },
+          "required": ["schema_version", "interval_ms", "stale_after_ms"],
+          "additionalProperties": false
         },
         "limits": {
           "$ref": "#/$defs/limits"

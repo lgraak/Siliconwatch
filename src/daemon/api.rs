@@ -101,7 +101,10 @@ pub(super) fn run(root: &Path, options: Options) -> io::Result<()> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")
         .filter(|path| !path.is_empty())
         .ok_or_else(|| io::Error::other("--local-api requires XDG_RUNTIME_DIR"))?;
-    let prepared = local_api::Prepared::new(Path::new(&runtime))?;
+    let prepared = local_api::Prepared::new(Path::new(&runtime))?.with_monitoring(
+        options.interval.as_millis() as u64,
+        options.stale_after.as_millis() as u64,
+    );
     let (owner, reader) =
         snapshot_cache::new(root, options.stale_after).map_err(io::Error::other)?;
     let control = Arc::new(Control::new());

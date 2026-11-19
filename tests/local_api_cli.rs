@@ -352,6 +352,7 @@ fn same_uid_methods_preserve_complete_fixture_snapshot_and_permissions() {
         json!({
             "supported_versions": [1], "methods": ["get_info", "get_snapshot"],
             "snapshot_schema_version": 2, "identity_schema_version": 1, "read_only": true,
+            "monitoring": {"schema_version": 1, "interval_ms": 60_000, "stale_after_ms": 60_000},
             "limits": { "request_bytes": 4096, "response_bytes": 1048576,
                 "active_clients": 1, "request_deadline_ms": 1000, "response_deadline_ms": 2000,
                 "max_sensors": 4096, "max_warnings": 1024, "max_identity_issues_per_sensor": 64,
@@ -649,11 +650,19 @@ fn existing_namespace_objects_and_second_instance_are_never_taken_over() {
     let identity = fs::symlink_metadata(f.socket()).unwrap();
     let mut second = f.spawn(&mut f.command(true, 60_000, 3_000), "second");
     assert_eq!(second.child.wait().code(), Some(1));
+    let diagnostic = fs::read_to_string(f.base.join("second.stderr")).unwrap();
+    assert!(diagnostic.contains("local API endpoint is occupied"));
+    assert!(diagnostic.contains(f.socket().to_str().unwrap()));
     assert_eq!(
         fs::symlink_metadata(f.socket()).unwrap().ino(),
         identity.ino()
     );
-    assert_eq!(f.method("get_info")["ok"], true);
+    let info = f.method("get_info");
+    assert_eq!(info["ok"], true);
+    assert_eq!(
+        info["result"]["monitoring"],
+        json!({"schema_version": 1, "interval_ms": 60_000, "stale_after_ms": 3_000})
+    );
     first.stop();
 }
 

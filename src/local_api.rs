@@ -99,6 +99,7 @@ pub(crate) struct Prepared {
     endpoint: os::Endpoint,
     uid: u32,
     instance_id: String,
+    monitoring: Option<wire::Monitoring>,
 }
 
 impl Prepared {
@@ -113,7 +114,17 @@ impl Prepared {
             endpoint,
             uid,
             instance_id,
+            monitoring: None,
         })
+    }
+
+    pub(crate) fn with_monitoring(mut self, interval_ms: u64, stale_after_ms: u64) -> Self {
+        self.monitoring = Some(wire::Monitoring {
+            schema_version: 1,
+            interval_ms,
+            stale_after_ms,
+        });
+        self
     }
 
     pub(crate) fn run(
@@ -180,7 +191,7 @@ impl Prepared {
         let budget = Budget::new(response_deadline, stopped);
         let response = match request {
             Ok(frame) => match wire::parse_request(&frame) {
-                Ok(Method::GetInfo) => wire::info(&self.instance_id, &budget),
+                Ok(Method::GetInfo) => wire::info(&self.instance_id, &budget, self.monitoring),
                 Ok(Method::GetSnapshot) => snapshot(&self.instance_id, &budget),
                 Err(error) => Err(error),
             },

@@ -365,7 +365,7 @@ fn serial_service_handles_info_errors_and_snapshot_without_a_second_worker() {
                 .unwrap()
                 .recv_timeout(Duration::from_secs(2))
                 .unwrap();
-            wire::info(instance, budget)
+            wire::info(instance, budget, None)
         })
     });
     let mut first = UnixStream::connect(fixture.socket()).unwrap();

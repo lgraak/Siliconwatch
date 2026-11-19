@@ -117,8 +117,17 @@ struct Limits {
     max_total_text_bytes: usize,
 }
 
+#[derive(Clone, Copy, Serialize)]
+pub(crate) struct Monitoring {
+    pub schema_version: u8,
+    pub interval_ms: u64,
+    pub stale_after_ms: u64,
+}
+
 #[derive(Serialize)]
 struct Info {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    monitoring: Option<Monitoring>,
     supported_versions: [u8; 1],
     methods: [&'static str; 2],
     snapshot_schema_version: u8,
@@ -127,7 +136,11 @@ struct Info {
     limits: Limits,
 }
 
-pub(crate) fn info(instance: &str, budget: &Budget<'_>) -> Result<Vec<u8>, ApiError> {
+pub(crate) fn info(
+    instance: &str,
+    budget: &Budget<'_>,
+    monitoring: Option<Monitoring>,
+) -> Result<Vec<u8>, ApiError> {
     validate_instance(instance)?;
     encode(
         &Response {
@@ -135,6 +148,7 @@ pub(crate) fn info(instance: &str, budget: &Budget<'_>) -> Result<Vec<u8>, ApiEr
             instance_id: instance,
             ok: true,
             result: Info {
+                monitoring,
                 supported_versions: [1],
                 methods: ["get_info", "get_snapshot"],
                 snapshot_schema_version: 2,

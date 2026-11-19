@@ -64,7 +64,7 @@ must be an unsigned integer, not a string or floating-point number.
 {"api_version":1,"method":"get_snapshot"}
 ```
 
-Append a literal LF to each request. `get_info` reports fixed protocol information;
+Append a literal LF to each request. `get_info` reports protocol information and may include effective daemon timings;
 `get_snapshot` assesses the latest complete cache publication without acquiring
 hardware. No arguments besides `api_version` and `method` are accepted.
 
@@ -86,7 +86,7 @@ specified below; schema validation alone cannot establish freshness or identity.
 
 ## Exact result fields
 
-All listed fields are present. “Nullable” means JSON null, not omission. API
+Fields are required unless marked optional. Required nullable fields use explicit JSON nulls. API
 sequence and time metadata are **decimal strings** to preserve precision in GUI
 languages: sequence and wall milliseconds are unsigned 64-bit quantities;
 monotonic nanoseconds and durations use unsigned 128-bit quantities. `"0"` is
@@ -101,6 +101,7 @@ valid. These strings have no sign, exponent, fraction or leading zeros.
 | `snapshot_schema_version`, `identity_schema_version` | integers 2 and 1 |
 | `read_only` | `true` |
 | `limits` | the numeric fields in the resource table below |
+| `monitoring` | optional read-only object with `schema_version: 1`, `interval_ms` (100–60000), and positive `stale_after_ms` as unsigned integers. Alpha 1 daemons may omit this object. |
 
 `get_snapshot.result` contains:
 
@@ -170,13 +171,29 @@ Each sensor has all these fields:
 | `raw_text` | nullable string retained by acquisition, including invalid text; the existing scanner trims surrounding whitespace |
 | `raw_value` | nullable exact signed 64-bit JSON integer |
 | `value` | nullable finite JSON number, canonical conversion separate from raw data |
-| `unit` | nullable string; current supported units `°C`, `RPM`, `V` |
+| `unit` | nullable string; current supported units `°C`, `RPM`, `V`, `%`, `B`, `MHz`, `W`, `P-state` |
 | `status` | `ok`, `unavailable`, `permission_denied`, `unsupported`, `invalid`, `error`, or `fault` |
 | `error` | nullable diagnostic string |
 
-Temperature conversion is millidegrees / 1000 into Celsius; voltage is millivolts
-/ 1000 into volts; fan speed remains RPM. Celsius remains default. Fahrenheit is
-a future presentation preference, not a raw acquisition transformation. A large
+NVML rows use provider evidence `nvml` and logical provenance paths under
+`nvml/<GPU UUID>/`. If the UUID is unavailable, `nvml/index-<n>/` identifies
+the device within that enumeration only. The row has no identity candidate
+and is ineligible for cross-sample statistics. The raw integer is the
+driver result in the unit encoded by `identity.evidence.measurement`; watts are
+converted from milliwatts. The used-memory row prefers the NVML v2 raw counter.
+Reserved bytes come directly from the same v2 query. The legacy query
+supplies used and total bytes only. Its reserved row has unsupported status
+and null numeric fields. Both legacy used and total carry distinct measurement
+evidence so a change of query version starts fresh aggregates. The NVML fan
+percentage describes intended operating speed relative to the device's rated
+speed and can exceed 100%.
+Missing calls and inaccessible devices have no
+numeric reading. Clients that do not recognize a measurement/unit pair may
+display the row without a formatted numeric value.
+
+For hwmon, divide millidegrees and millivolts by 1000 to obtain °C and V.
+Hwmon fan speed is in RPM. NVML already reports degrees Celsius. The GUI can
+display Fahrenheit while retaining the original acquisition values. A large
 `raw_value` can exceed JavaScript Number precision: use a lossless JSON parser or
 retain `raw_text`; do not round-trip it through a binary64 integer. No calibration,
 correction or fabricated value is applied. An erroneous row can still retain raw
