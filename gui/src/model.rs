@@ -21,6 +21,20 @@ impl GroupKey {
             path: s.device_path.clone(),
         }
     }
+
+    pub fn title(&self, sensor: Option<&Sensor>) -> String {
+        let provider = self.provider.as_deref();
+        let device = sensor.map(|sensor| sensor.device.as_str());
+        let name = match provider {
+            Some("nvml") => device.or(provider),
+            _ => provider.or(device),
+        };
+        visible(&format!(
+            "{} · {}",
+            name.unwrap_or("Unknown source"),
+            self.path.rsplit('/').next().unwrap_or("source")
+        ))
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum VisibleRow {
@@ -196,6 +210,7 @@ impl SensorModel {
             .current
             .as_ref()
             .is_some_and(|c| c.snapshot.instance_id == incoming.snapshot.instance_id);
+        let mut same_observation = false;
         if same_instance {
             let old = &self.current.as_ref().unwrap().snapshot.assessment;
             let new = &incoming.snapshot.assessment;
@@ -206,9 +221,8 @@ impl SensorModel {
                 return Err("Protocol error: same-instance time or sequence regression".into());
             }
             if let (Some(a), Some(b)) = (&old.observation, &new.observation) {
-                if a.attempt.sequence == b.attempt.sequence
-                    && (a.attempt != b.attempt || a.snapshot != b.snapshot)
-                {
+                same_observation = a.attempt.sequence == b.attempt.sequence;
+                if same_observation && (a.attempt != b.attempt || a.snapshot != b.snapshot) {
                     return Err(
                         "Protocol error: cached publication changed without a new sequence".into(),
                     );
@@ -235,7 +249,7 @@ impl SensorModel {
                 self.notice = "New daemon instance · session statistics reset".into();
             }
         }
-        if same_instance {
+        if same_instance && !same_observation {
             if let Some(key) = selected_key {
                 self.selected = self.unique_matching_index(&key).map(VisibleRow::Sensor);
             }
@@ -262,6 +276,12 @@ impl SensorModel {
             .map(|s| (RowKey::of(s), s.identity.clone(), s.source_path.clone()))
     }
     fn unique_matching_index(&self, stamp: &(RowKey, Identity, String)) -> Option<usize> {
+        // NVML enumeration indices can change whenever devices are enumerated again.
+        if stamp.0.provider.as_deref() == Some("nvml")
+            && (stamp.1.candidate.is_none() || stamp.1.status != "best_effort")
+        {
+            return None;
+        }
         let index = self.unique_index(&stamp.0)?;
         let sensor = &self.sensors()[index];
         (sensor.identity == stamp.1 && sensor.source_path == stamp.2).then_some(index)
@@ -342,18 +362,12 @@ impl SensorModel {
         None
     }
     pub fn group_title(&self, group: &GroupKey) -> String {
-        let label = self
-            .groups()
+        let groups = self.groups();
+        let sensor = groups
             .get(group)
-            .and_then(|v| v.first())
-            .and_then(|&i| self.sensors().get(i))
-            .map(|s| s.device.as_str())
-            .unwrap_or("Unknown source");
-        visible(&format!(
-            "{} · {}",
-            group.provider.as_deref().unwrap_or(label),
-            group.path.rsplit('/').next().unwrap_or("source")
-        ))
+            .and_then(|indices| indices.first())
+            .and_then(|&index| self.sensors().get(index));
+        group.title(sensor)
     }
     pub fn status(&self, now: Instant) -> String {
         if self.current.is_none() && !self.connection_message.is_empty() {

@@ -882,3 +882,26 @@ fn tray_change_precommit_failure_keeps_old_value_and_allows_retry() {
     assert_eq!(read_import(&f.path).unwrap(), next);
     assert_eq!(fs::read(backup_path(&f.path)).unwrap(), original);
 }
+
+#[test]
+fn monitoring_settings_round_trip_and_reject_conflicting_timings() {
+    let mut preferences = parse_profile(minimal().as_bytes()).unwrap();
+    assert_eq!(preferences.monitoring, Monitoring::default());
+    preferences.monitoring = Monitoring {
+        interval_ms: 6_000,
+        stale_after_ms: 15_000,
+        response_timeout_ms: 750,
+    };
+    let encoded = serialize_profile(&preferences).unwrap();
+    assert_eq!(parse_profile(&encoded).unwrap(), preferences);
+    assert_eq!(
+        preferences.monitoring.command(),
+        "siliconwatch daemon --local-api --interval-ms 6000 --stale-after-ms 15000"
+    );
+
+    preferences.monitoring.stale_after_ms = 5_999;
+    assert!(preferences.validate().is_err());
+    preferences.monitoring.stale_after_ms = 15_000;
+    preferences.monitoring.response_timeout_ms = 0;
+    assert!(preferences.validate().is_err());
+}

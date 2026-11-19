@@ -4,6 +4,7 @@ use crate::protocol::{Sensor, parse_snapshot};
 use serde_json::json;
 fn timed(sequence: u64, now: Instant) -> TimedSnapshot {
     TimedSnapshot {
+        monitoring: None,
         snapshot: parse_snapshot(&frame(&sample_value(sequence))).unwrap(),
         request_started: now - Duration::from_millis(10),
         response_received: now - Duration::from_millis(5),
@@ -249,4 +250,44 @@ fn group_mapping_rejects_ambiguous_conflicting_and_mixed_registration_anchors() 
     sibling.identity.candidate = None;
     sibling.identity.status = "ambiguous_channel".into();
     assert!(match_group(&record, &[first, sibling]).is_err());
+}
+
+#[test]
+fn nvml_group_title_includes_product_name_and_distinct_source() {
+    let mut sample = timed(1, Instant::now());
+    let sensor = &mut sensors(&mut sample)[0];
+    sensor.device = "Quadro P620".into();
+    sensor.device_path = "nvml/GPU-first".into();
+    sensor.identity.evidence.provider = Some("nvml".into());
+    assert_eq!(
+        GroupKey::of(sensor).title(Some(sensor)),
+        "Quadro P620 · GPU-first"
+    );
+    sensor.device_path = "nvml/GPU-second".into();
+    assert_eq!(
+        GroupKey::of(sensor).title(Some(sensor)),
+        "Quadro P620 · GPU-second"
+    );
+}
+
+#[test]
+fn nvml_index_only_selection_expires_when_the_gpu_is_reenumerated() {
+    let now = Instant::now();
+    let mut first = timed(1, now);
+    let row = &mut sensors(&mut first)[0];
+    row.identity.evidence.provider = Some("nvml".into());
+    row.device_path = "nvml/index-0".into();
+    let mut model = SensorModel::default();
+    model.accept(first.clone(), now).unwrap();
+    model.selected = Some(VisibleRow::Sensor(0));
+    model.details_sensor = Some(0);
+
+    model.accept(first, now).unwrap();
+    assert_eq!(model.details_sensor, Some(0));
+
+    let mut next = timed(2, now);
+    *sensors(&mut next) = model.sensors().to_vec();
+    model.accept(next, now).unwrap();
+    assert_eq!(model.details_sensor, None);
+    assert!(matches!(model.selected, Some(VisibleRow::Group(_))));
 }
