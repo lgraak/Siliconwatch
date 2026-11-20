@@ -20,8 +20,12 @@ on:
         description: SHA-256 of candidate.json from the reviewed run
         required: true
         type: string
+      rehearse_approval:
+        description: Exercise release approval with a read-only token
+        type: boolean
+        default: false
       publish:
-        description: Request Chris's approval to publish these exact artifacts
+        description: Request a separate release-environment confirmation to publish these exact artifacts
         type: boolean
         default: false
         required: true
@@ -57,10 +61,17 @@ jobs:
     timeout-minutes: 20
     environment: release-candidate
     steps:
-      - name: Require the canonical main workflow
+      - name: Require the canonical main workflow and compatible dispatch options
+        env:
+          PUBLISH: ${{ inputs.publish }}
+          REHEARSE_APPROVAL: ${{ inputs.rehearse_approval }}
         run: |
           test "$GITHUB_REPOSITORY" = lgraak/Siliconwatch
           test "$GITHUB_REF" = refs/heads/main
+          case "$PUBLISH/$REHEARSE_APPROVAL" in
+            false/false|false/true|true/false) ;;
+            *) echo "Choose verification, approval rehearsal, or publication." >&2; exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -81,16 +92,39 @@ jobs:
 
   publication-policy:
     needs: verify
-    if: inputs.publish
+    if: inputs.publish != inputs.rehearse_approval
     uses: ./.github/workflows/release-policy.yml
     secrets:
       RELEASE_POLICY_READER: ${{ secrets.RELEASE_POLICY_READER }}
     with:
       publication: true
 
+  rehearse:
+    needs: [verify, publication-policy]
+    if: inputs.rehearse_approval && !inputs.publish && github.run_attempt == '1' && github.ref == 'refs/heads/main' && github.repository == 'lgraak/Siliconwatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    environment:
+      name: release
+      url: https://github.com/lgraak/Siliconwatch/actions/runs/${{ inputs.candidate_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify approval and candidate with a read-only token
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_KEY: ${{ secrets.CANDIDATE_KEY }}
+        run: |
+          python3 scripts/release/promote.py --rehearse-approval --repository "$GITHUB_REPOSITORY" \
+            --run-id "$CANDIDATE_RUN" --version "$VERSION" --commit "$SOURCE_COMMIT" --digest "$MANIFEST_SHA256"
+
   publish:
     needs: [verify, publication-policy]
-    if: inputs.publish && github.run_attempt == '1' && github.ref == 'refs/heads/main' && github.repository == 'lgraak/Siliconwatch'
+    if: inputs.publish && !inputs.rehearse_approval && github.run_attempt == '1' && github.ref == 'refs/heads/main' && github.repository == 'lgraak/Siliconwatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

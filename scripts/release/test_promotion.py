@@ -23,7 +23,9 @@ TAG = "v0.1.0-alpha.2"
 SHA = "ab" * 20
 REPO = "lgraak/Siliconwatch"
 KEY = "a0" * 32  # isolated generated fixture content, never an Actions credential
-ENV = {"GITHUB_ACTOR_ID": "503", "GITHUB_REPOSITORY_OWNER_ID": "9121312", "GITHUB_REF": "refs/heads/main", "GITHUB_RUN_ATTEMPT": "1", "GITHUB_RUN_ID": "101",
+ENV = {"GITHUB_ACTOR": "lgraak", "GITHUB_ACTOR_ID": "9121312", "GITHUB_REPOSITORY_OWNER_ID": "9121312",
+       "GITHUB_REPOSITORY_ID": "1459688906", "GITHUB_REF": "refs/heads/main", "GITHUB_REF_PROTECTED": "true",
+       "GITHUB_RUN_ATTEMPT": "1", "GITHUB_RUN_ID": "101",
        "GITHUB_REPOSITORY": REPO, "GITHUB_EVENT_NAME": "workflow_dispatch",
        "GITHUB_WORKFLOW_REF": f"{REPO}/.github/workflows/release-publish.yml@refs/heads/main",
        "CANDIDATE_KEY": KEY}
@@ -40,6 +42,7 @@ class LocalRelease:
         self.tag = None
         self.run = {"id": 100, "run_attempt": 1, "event": "workflow_dispatch", "path": promote.CANDIDATE_WORKFLOW,
                     "head_branch": "main", "head_sha": SHA, "status": "completed", "conclusion": "success",
+                    "actor": {"login": "lgraak", "id": 9121312},
                     "repository": {"full_name": REPO}, "head_repository": {"full_name": REPO}}
         self.artifact = {"id": 50, "name": "candidate-" + TAG, "expired": False}
         self.reviews = [{"state": "approved", "user": {"login": "lgraak", "id": 9121312}, "environments": [{"name": "release"}]}]
@@ -65,6 +68,7 @@ class LocalRelease:
             if path == "releases/5":
                 return self.releases[0]
             return {"actions/runs/100": self.run, "actions/runs/101/approvals": self.reviews,
+                    "actions/runs/102/approvals": [],
                     "git/ref/tags/" + TAG: self.tag}[path]
         self.writes.append((method, path))
         if (method, path) == ("POST", "releases"):
@@ -136,14 +140,20 @@ class Promotion(unittest.TestCase):
             result = candidate.seal(TAG, SHA, self.packages, self.source, self.notes, copy, Path(temp) / "bundle")
             self.assertEqual(result, self.digest)
 
-    def test_approved_promotion_uploads_exact_bytes_then_creates_tag_and_publishes(self):
+    def test_solo_maintainer_verifies_then_approves_and_publishes_identical_assets(self):
         remote = LocalRelease(self.archive)
+        approval = remote.reviews.pop()
+        self.run_promotion(remote, publish=False)
+        self.assertEqual(remote.writes, [])
+        remote.reviews.append(approval)
         self.run_promotion(remote)
         self.assertEqual(remote.writes, [("POST", "releases"), *(["upload"] * len(candidate.bundle_names(TAG))),
                                          ("POST", "git/refs"), ("PATCH", "releases/5")])
         self.assertEqual(remote.tag["object"]["sha"], SHA)
         self.assertEqual(remote.releases[0]["draft"], False)
         self.assertTrue(remote.releases[0]["prerelease"])
+        self.assertEqual({name: row["digest"] for name, row in remote.assets.items()},
+                         {path.name: "sha256:" + candidate.sha256(path) for path in self.bundle.iterdir()})
 
     def test_dry_run_has_zero_writes_even_without_approval(self):
         remote = LocalRelease(self.archive)
@@ -151,9 +161,31 @@ class Promotion(unittest.TestCase):
         self.run_promotion(remote, publish=False)
         self.assertEqual(remote.writes, [])
 
-    def test_control_requires_approval_from_named_reviewer_for_this_environment(self):
-        for reviews in ([], [{"state": "approved", "user": {"login": "other"}, "environments": [{"name": "release"}]}],
-                        [{"state": "approved", "user": {"login": "lgraak"}, "environments": [{"name": "candidate"}]}]):
+    def test_rehearsal_cli_requires_approval_and_verifies_candidate_without_writes(self):
+        remote = LocalRelease(self.archive)
+        args = ["promote.py", "--rehearse-approval", "--repository", REPO, "--version", TAG, "--commit", SHA,
+                "--run-id", "100", "--digest", self.digest]
+        with patch("sys.argv", args), patch.dict("os.environ", ENV | {"GH_TOKEN": "fixture"}, clear=True), \
+                patch.object(promote, "GitHub", return_value=remote):
+            promote.main()
+            args[-1] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "manifest differs"):
+                promote.main()
+            args[-1] = self.digest
+            remote.reviews = []
+            with self.assertRaisesRegex(ValueError, "approval"):
+                promote.main()
+        with self.assertRaisesRegex(ValueError, "either rehearsal or publication"):
+            self.run_promotion(remote, publish=True, rehearse_approval=True)
+        self.assertEqual(remote.writes, [])
+
+    def test_control_requires_one_owner_approval_for_this_release_environment(self):
+        approved = LocalRelease(self.archive).reviews[0]
+        rejected = approved | {"state": "rejected"}
+        for reviews in ([], [rejected], [approved, rejected], [approved, approved],
+                        [approved | {"user": {"login": "lgraakcg", "id": 503}}],
+                        [approved | {"user": {"login": "lgraak", "id": 503}}],
+                        [approved | {"environments": [{"name": "release-candidate"}]}]):
             with self.subTest(reviews=reviews):
                 remote = LocalRelease(self.archive)
                 remote.reviews = reviews
@@ -161,18 +193,23 @@ class Promotion(unittest.TestCase):
                     self.run_promotion(remote)
                 self.assertEqual(remote.writes, [])
 
-    def test_review_identity_and_dispatcher_are_distinct(self):
+    def test_approval_for_an_earlier_owner_dispatch_does_not_authorize_this_run(self):
         remote = LocalRelease(self.archive)
-        for dispatcher in ("", "unknown", ENV["GITHUB_REPOSITORY_OWNER_ID"]):
-            with self.subTest(dispatcher=dispatcher), self.assertRaisesRegex(ValueError, "independent"):
-                self.run_promotion(remote, env=ENV | {"GITHUB_ACTOR_ID": dispatcher})
-        remote.reviews[0]["user"]["id"] = 12345
         with self.assertRaisesRegex(ValueError, "approval"):
-            self.run_promotion(remote)
+            self.run_promotion(remote, env=ENV | {"GITHUB_RUN_ID": "102"})
+        self.assertEqual(remote.writes, [])
+
+    def test_only_the_recognized_owner_can_dispatch_publication(self):
+        remote = LocalRelease(self.archive)
+        for field, value in (("GITHUB_ACTOR", "lgraakcg"), ("GITHUB_ACTOR_ID", "503"), ("GITHUB_ACTOR_ID", "")):
+            with self.subTest(field=field, value=value), self.assertRaisesRegex(ValueError, "dispatch by lgraak"):
+                self.run_promotion(remote, env=ENV | {field: value})
         self.assertEqual(remote.writes, [])
 
     def test_manual_main_publisher_only(self):
         for key, value in (("GITHUB_REF", "refs/tags/" + TAG), ("GITHUB_RUN_ATTEMPT", "2"),
+                          ("GITHUB_REF_PROTECTED", "false"), ("GITHUB_REPOSITORY_ID", "1"),
+                          ("GITHUB_REPOSITORY_OWNER_ID", "503"),
                           ("GITHUB_EVENT_NAME", "pull_request"), ("GITHUB_WORKFLOW_REF", "something else")):
             with self.subTest(key=key):
                 remote = LocalRelease(self.archive)
@@ -182,6 +219,8 @@ class Promotion(unittest.TestCase):
 
     def test_untrusted_candidate_run_or_artifact(self):
         for key, value in (("head_repository", {"full_name": "fork/repo"}), ("head_sha", "0" * 40),
+                          ("actor", {"login": "lgraakcg", "id": 503}),
+                          ("actor", {"login": "lgraak", "id": 503}),
                           ("path", ".github/workflows/other.yml"), ("event", "pull_request"),
                           ("conclusion", "failure"), ("head_branch", "other")):
             with self.subTest(key=key):
@@ -321,6 +360,23 @@ class Promotion(unittest.TestCase):
             file.symlink_to(self.notes)
             with self.assertRaises(ValueError):
                 candidate.verify(copy, TAG, SHA, self.digest)
+
+    def test_modified_package_in_encrypted_candidate_prevents_promotion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle = root / "bundle"
+            shutil.copytree(self.bundle, bundle)
+            package = next(bundle.glob("*.deb"))
+            package.write_bytes(b"changed package")
+            encrypted = root / "candidate.tar.gpg"
+            envelope.pack(bundle, encrypted, KEY)
+            archive = root / "encrypted.zip"
+            with zipfile.ZipFile(archive, "w") as stream:
+                stream.write(encrypted, encrypted.name)
+            remote = LocalRelease(archive)
+            with self.assertRaisesRegex(ValueError, "SHA256SUMS"):
+                self.run_promotion(remote)
+            self.assertEqual(remote.writes, [])
 
     def test_seal_requires_verification_reports_and_matching_packaged_provenance(self):
         with tempfile.TemporaryDirectory() as tmp:

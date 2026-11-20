@@ -24,6 +24,8 @@ jobs:
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_REPOSITORY_ID" = 1459688906
           test "$GITHUB_REPOSITORY" = lgraak/Siliconwatch
+          test "$GITHUB_ACTOR_ID" = 9121312
+          test "$GITHUB_ACTOR" = lgraak
           test "$GITHUB_REF" = refs/heads/main
           test "$GITHUB_REF_PROTECTED" = true
           test "$GITHUB_RUN_ATTEMPT" = 1

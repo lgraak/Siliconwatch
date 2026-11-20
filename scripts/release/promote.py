@@ -15,6 +15,9 @@ from candidate import bundle_names, check_identity, require, sha256, verify
 from envelope import MAX_BYTES, unpack as unpack_envelope
 
 CANDIDATE_WORKFLOW = ".github/workflows/release-candidate.yml"
+REPOSITORY = "lgraak/Siliconwatch"
+MAINTAINER = "lgraak"
+MAINTAINER_ID = 9121312
 
 
 class DownloadRedirect(request.HTTPRedirectHandler):
@@ -90,6 +93,9 @@ def trusted_artifact(api, repo, run_id, version, commit):
     expected = {"id": run_id, "event": "workflow_dispatch", "path": CANDIDATE_WORKFLOW,
                 "head_branch": "main", "head_sha": commit, "run_attempt": 1, "status": "completed", "conclusion": "success"}
     require(all(run.get(key) == value for key, value in expected.items()), "Candidate run provenance mismatch")
+    actor = run["actor"]
+    require(actor["login"] == MAINTAINER and actor["id"] == MAINTAINER_ID,
+            "Candidate requires a manual dispatch by lgraak")
     for key in ("repository", "head_repository"):
         require(run[key]["full_name"] == repo, "Candidate run repository mismatch")
     artifacts = [a for a in api.pages(f"actions/runs/{run_id}/artifacts", "artifacts")
@@ -112,22 +118,22 @@ def unpack(blob, directory, version, key):
 
 def require_approval(api, repo, env):
     ref = "refs/heads/main"
-    expected = {"GITHUB_REPOSITORY": repo, "GITHUB_REF": ref, "GITHUB_EVENT_NAME": "workflow_dispatch",
+    expected = {"GITHUB_REPOSITORY": REPOSITORY, "GITHUB_REPOSITORY_ID": "1459688906",
+                "GITHUB_REPOSITORY_OWNER_ID": str(MAINTAINER_ID), "GITHUB_REF_PROTECTED": "true",
+                "GITHUB_REF": ref, "GITHUB_EVENT_NAME": "workflow_dispatch",
                 "GITHUB_WORKFLOW_REF": f"{repo}/.github/workflows/release-publish.yml@{ref}",
                 "GITHUB_RUN_ATTEMPT": "1"}
-    require(all(env.get(key) == value for key, value in expected.items()),
+    require(repo == REPOSITORY and all(env.get(key) == value for key, value in expected.items()),
             "Publish requires a fresh manual release-publish workflow from main")
     publisher_run = env.get("GITHUB_RUN_ID", "")
     require(re.fullmatch(r"[1-9][0-9]*", publisher_run), "Invalid publisher run ID")
-    dispatcher = env.get("GITHUB_ACTOR_ID", "")
-    owner = env.get("GITHUB_REPOSITORY_OWNER_ID", "")
-    require(owner == "9121312" and re.fullmatch(r"[1-9][0-9]*", dispatcher) and dispatcher != owner,
-            "Publication requires a dispatcher independent of the designated reviewer")
+    require(env.get("GITHUB_ACTOR") == MAINTAINER and env.get("GITHUB_ACTOR_ID") == str(MAINTAINER_ID),
+            "Publication requires a manual dispatch by lgraak")
     reviews = api.json(f"actions/runs/{publisher_run}/approvals")
-    require(any(row["state"] == "approved" and row["user"]["login"] == "lgraak" and
-                row["user"].get("id") == int(owner) and
-                any(e["name"] == "release" for e in row["environments"]) for row in reviews),
-            "Missing explicit release environment approval by lgraak")
+    decisions = [row for row in reviews if any(e["name"] == "release" for e in row["environments"])]
+    require(len(decisions) == 1 and decisions[0]["state"] == "approved" and
+            decisions[0]["user"]["login"] == MAINTAINER and decisions[0]["user"].get("id") == MAINTAINER_ID,
+            "Expected one explicit release environment approval by lgraak for this run")
 
 
 def check_release_name(api, version):
@@ -163,14 +169,15 @@ def release_metadata(version, commit, notes):
             "body": notes.read_text(), "prerelease": "-" in version}
 
 
-def promote(api, repo, version, commit, run_id, digest, publish, env):
+def promote(api, repo, version, commit, run_id, digest, publish, env, *, rehearse_approval=False):
+    require(not (publish and rehearse_approval), "Choose either rehearsal or publication")
     check_identity(version, commit)
     require(re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", repo), "Invalid repository")
     require(isinstance(run_id, int) and run_id > 0, "Invalid candidate run ID")
     require(re.fullmatch(r"[a-f0-9]{64}", digest), "Expected full approved manifest digest")
     key = env.get("CANDIDATE_KEY", "")
     require(re.fullmatch(r"[a-fA-F0-9]{64}", key), "CANDIDATE_KEY must be a 64-character hex secret")
-    if publish:
+    if publish or rehearse_approval:
         require_approval(api, repo, env)
     artifact = trusted_artifact(api, repo, run_id, version, commit)
     with tempfile.TemporaryDirectory() as temp:
@@ -212,10 +219,13 @@ def main():
     for arg in ("repository", "version", "commit", "digest"):
         parser.add_argument("--" + arg, required=True)
     parser.add_argument("--run-id", required=True, type=int)
-    parser.add_argument("--publish", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--publish", action="store_true")
+    mode.add_argument("--rehearse-approval", action="store_true", help="verify approval and candidate with read-only access")
     args = parser.parse_args()
     api = GitHub(args.repository, os.environ["GH_TOKEN"])
-    promote(api, args.repository, args.version, args.commit, args.run_id, args.digest, args.publish, os.environ)
+    promote(api, args.repository, args.version, args.commit, args.run_id, args.digest, args.publish, os.environ,
+            rehearse_approval=args.rehearse_approval)
 
 
 if __name__ == "__main__":
