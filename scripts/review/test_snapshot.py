@@ -1,6 +1,7 @@
 """Offline tests for the mounted reviewer controls and the MCP policy preflight."""
 
 import errno
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -126,6 +127,32 @@ class SnapshotTests(unittest.TestCase):
                     context["permission_profile"] = settings
                     path.write_text("".join(json.dumps(event) + "\n" for event in events + tail))
                     session.read_session(path, "fixture reviewer")
+
+    def test_incomplete_ambiguous_or_wrong_target_report_is_rejected(self):
+        target = "a" * 40 + " worktree " + "b" * 64
+        packet = "c" * 64
+        complete = "Review status: complete " + target
+        session.verify_report(f"Open important finding. Packet {packet}\n{complete}", packet, target)
+        for status in ("", "Review status: incomplete", "Review status: complete " + target.replace("a" * 40, "d" * 40),
+                       f"Review status: incomplete\n{complete}", complete + "\nmore"):
+            with self.subTest(status=status), self.assertRaises(ValueError):
+                session.verify_report(f"Packet {packet}\n{status}", packet, target)
+        with self.assertRaises(ValueError):
+            session.verify_report(complete, packet, target)
+
+    def test_duplicate_native_session_ids_are_rejected(self):
+        result = ({"id": "duplicate"}, [], True, "report", [], [])
+        with patch.object(session, "read_session", return_value=result), self.assertRaises(ValueError):
+            session.collect_sessions(["one", "two"], "instructions")
+
+    def test_worktree_target_binds_exact_trailing_patch_bytes(self):
+        patch_bytes = b"diff fixture\n"
+        target = "a" * 40 + " worktree " + hashlib.sha256(patch_bytes).hexdigest()
+        packet = f"Target: {target}\nRequirements\n--- BEGIN FROZEN GIT PATCH ---\n".encode() + patch_bytes
+        with patch.object(session.subprocess, "check_output", return_value=b"commit\n"):
+            self.assertEqual(session.review_target(packet, "/usr/bin/false"), target)
+            with self.assertRaises(ValueError):
+                session.review_target(packet.rstrip(), "/usr/bin/false")
 
     def test_concurrent_edit_uses_pinned_mounts(self):
         required = os.environ.get("SILICONWATCH_REQUIRE_REVIEW_SNAPSHOT") == "1"
