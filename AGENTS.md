@@ -24,6 +24,28 @@ Read `README.md`, `docs/DESIGN_DECISIONS.md`, and any instructions in the affect
 - Preserve essential safety and security constraints while allowing evidence-based architectural revisions; document proposed deviations rather than silently changing accepted decisions.
 - Follow DCO signoff requirements for every authorized contribution commit.
 
+## Independent review before merge
+
+Before presenting substantive changes for merge, the implementing agent must obtain a review from the project-scoped Codex agent `reviewer`. This applies to runtime behavior, APIs, stored settings, concurrency, permissions, CI, packaging and release controls. One reviewer is sufficient. Typo-only and formatting-only edits can skip this step.
+
+1. **Freeze the proposal.** Supply the original requirements, observable acceptance criteria, relevant paths, accepted design decisions and exact diff. For commits, give full base and head SHAs and `git diff --no-ext-diff --no-textconv --binary --full-index BASE HEAD`. For local work, give the full base SHA, a saved full-index binary patch and its SHA-256. Check its inventory against all intended staged, unstaged and new files, deletions and mode changes. Review the frozen objects or patch. Verify live files against their postimages before relying on them. Leave the builder's rationale, self-assessment and desired verdict out of the packet.
+2. **Start from trusted instructions.** Launch a fresh coordinator at a checkout with previously trusted review controls. If the proposal changes Codex configuration, agent definitions, hooks, skills or project instructions, launch from a separate trusted base checkout and pass the proposal as data. Read design guidance at the named base or head. For the first installation, inspect the new role and all local configuration before trusting the checkout, disable automatic project instructions for the bootstrap (`-c project_doc_max_bytes=0`), and pass the base guidance explicitly. Record the inspected role's digest. The maintainer decides whether to adopt it.
+3. **Spawn and verify.** Begin the packet with “Spawn the project agent type `reviewer` with fresh context, give it only the packet below, wait for completion and return its report and child ID.” Use a separate read-only coordinator because the child inherits its parent's permissions. Preserve runtime evidence for the selected role, parent and distinct child, such as the native spawn arguments and child thread metadata. A task nickname or a coordinator's own prose cannot establish this. If the role or its spawn cannot be verified, report independent review as unavailable and leave the gate open.
+4. **Resolve findings.** Return the child's findings to the implementing agent. For each, record the correction and test, evidence that resolves it, or an open decision for the maintainer. After remediation or any substantive change, freeze the entire updated proposal and request a fresh reviewer with the prior findings as questions to verify. Keep unresolved findings visible. Withhold a merge-ready recommendation while a blocking or important finding remains open.
+5. **Handoff.** Include the target SHAs or digest, reviewer identity, findings and dispositions, checks run and remaining gaps. CI and DCO remain separate mandatory checks. Label the result as an AI code review. Human GitHub approvals and protected release approvals come from the designated people.
+
+For a CLI review, run this Bash example from the trusted checkout. Keep the packet and output outside the checkout. Add any needed per-session overrides to `review_flags`, for example `-c mcp_servers.node_repl.enabled=false` on a host with that server. Use the same flags for the preflight and review. The preflight reports enabled MCP server names and blocks launch until each is disabled. The review ignores execution-policy allow rules that could otherwise run shell commands outside the sandbox.
+
+```bash
+set -o pipefail
+review_flags=(--disable apps --disable plugins --disable hooks --disable memories)
+codex "${review_flags[@]}" mcp list --json |
+    python3 -c 'import json, sys; names = [s["name"] for s in json.load(sys.stdin) if s["enabled"]]; sys.exit(", ".join(names) if names else 0)' &&
+    codex "${review_flags[@]}" -a never exec --ignore-rules --sandbox read-only --json - < /path/to/review-packet.txt
+```
+
+The CLI summary may omit the selected role. In that case, use the child thread's Codex metadata (`thread/read`) or the recorded native `spawn_agent` call and corresponding child result to verify the handoff.
+
 ## Required milestone handoff
 
 Save each completed report under `docs/milestones/NNN-milestone-name.md`, using a zero-padded milestone number and a descriptive filename. Preserve prior reports and clearly date later review updates.
