@@ -45,6 +45,33 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("--publish", str(jobs["verify"]["steps"]))
         self.assertIn("--publish", str(publish["steps"]))
 
+    def test_approval_rehearsal_requires_publication_policy_and_read_only_release_job(self):
+        approval = workflow("release-publish.yml")
+        flags = approval["on"]["workflow_dispatch"]["inputs"]
+        for flag in ("rehearse_approval", "publish"):
+            self.assertEqual((flags[flag]["type"], flags[flag]["default"]), ("boolean", "false"))
+        jobs = approval["jobs"]
+        self.assertEqual(jobs["publication-policy"]["if"], "inputs.publish != inputs.rehearse_approval")
+        rehearsal, publish = jobs["rehearse"], jobs["publish"]
+        self.assertEqual(set(rehearsal["needs"]), {"verify", "publication-policy"})
+        self.assertEqual(rehearsal["environment"], publish["environment"])
+        self.assertEqual(rehearsal["permissions"], {"contents": "read", "actions": "read"})
+        self.assertTrue(rehearsal["if"].startswith("inputs.rehearse_approval && !inputs.publish && "))
+        self.assertTrue(publish["if"].startswith("inputs.publish && !inputs.rehearse_approval && "))
+        self.assertIn("--rehearse-approval", str(rehearsal["steps"]))
+        self.assertNotIn("--publish", str(rehearsal["steps"]))
+
+        gate = jobs["verify"]["steps"][0]
+        self.assertEqual(gate["env"], {"PUBLISH": "${{ inputs.publish }}",
+                                       "REHEARSE_APPROVAL": "${{ inputs.rehearse_approval }}"})
+        for requests, allowed in [(("false", "false"), True), (("false", "true"), True),
+                                  (("true", "false"), True), (("true", "true"), False), (("", ""), False)]:
+            with self.subTest(requests=requests):
+                env = {"GITHUB_REPOSITORY": "lgraak/Siliconwatch", "GITHUB_REF": "refs/heads/main",
+                       "PUBLISH": requests[0], "REHEARSE_APPROVAL": requests[1]}
+                result = subprocess.run(["bash", "-e", "-c", gate["run"]], env=env, capture_output=True)
+                self.assertEqual(result.returncode == 0, allowed)
+
     def test_live_policy_is_checked_before_the_release_environments(self):
         policy = workflow("release-policy.yml")
         self.assertEqual(set(policy["on"]), {"workflow_call"})

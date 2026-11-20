@@ -161,6 +161,24 @@ class Promotion(unittest.TestCase):
         self.run_promotion(remote, publish=False)
         self.assertEqual(remote.writes, [])
 
+    def test_rehearsal_cli_requires_approval_and_verifies_candidate_without_writes(self):
+        remote = LocalRelease(self.archive)
+        args = ["promote.py", "--rehearse-approval", "--repository", REPO, "--version", TAG, "--commit", SHA,
+                "--run-id", "100", "--digest", self.digest]
+        with patch("sys.argv", args), patch.dict("os.environ", ENV | {"GH_TOKEN": "fixture"}, clear=True), \
+                patch.object(promote, "GitHub", return_value=remote):
+            promote.main()
+            args[-1] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "manifest differs"):
+                promote.main()
+            args[-1] = self.digest
+            remote.reviews = []
+            with self.assertRaisesRegex(ValueError, "approval"):
+                promote.main()
+        with self.assertRaisesRegex(ValueError, "either rehearsal or publication"):
+            self.run_promotion(remote, publish=True, rehearse_approval=True)
+        self.assertEqual(remote.writes, [])
+
     def test_control_requires_one_owner_approval_for_this_release_environment(self):
         approved = LocalRelease(self.archive).reviews[0]
         rejected = approved | {"state": "rejected"}

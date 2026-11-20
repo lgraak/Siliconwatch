@@ -169,14 +169,15 @@ def release_metadata(version, commit, notes):
             "body": notes.read_text(), "prerelease": "-" in version}
 
 
-def promote(api, repo, version, commit, run_id, digest, publish, env):
+def promote(api, repo, version, commit, run_id, digest, publish, env, *, rehearse_approval=False):
+    require(not (publish and rehearse_approval), "Choose either rehearsal or publication")
     check_identity(version, commit)
     require(re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", repo), "Invalid repository")
     require(isinstance(run_id, int) and run_id > 0, "Invalid candidate run ID")
     require(re.fullmatch(r"[a-f0-9]{64}", digest), "Expected full approved manifest digest")
     key = env.get("CANDIDATE_KEY", "")
     require(re.fullmatch(r"[a-fA-F0-9]{64}", key), "CANDIDATE_KEY must be a 64-character hex secret")
-    if publish:
+    if publish or rehearse_approval:
         require_approval(api, repo, env)
     artifact = trusted_artifact(api, repo, run_id, version, commit)
     with tempfile.TemporaryDirectory() as temp:
@@ -218,10 +219,13 @@ def main():
     for arg in ("repository", "version", "commit", "digest"):
         parser.add_argument("--" + arg, required=True)
     parser.add_argument("--run-id", required=True, type=int)
-    parser.add_argument("--publish", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--publish", action="store_true")
+    mode.add_argument("--rehearse-approval", action="store_true", help="verify approval and candidate with read-only access")
     args = parser.parse_args()
     api = GitHub(args.repository, os.environ["GH_TOKEN"])
-    promote(api, args.repository, args.version, args.commit, args.run_id, args.digest, args.publish, os.environ)
+    promote(api, args.repository, args.version, args.commit, args.run_id, args.digest, args.publish, os.environ,
+            rehearse_approval=args.rehearse_approval)
 
 
 if __name__ == "__main__":

@@ -123,8 +123,7 @@ class HostedPolicyTests(unittest.TestCase):
 
     def test_review_identity_and_admin_bypass_must_be_proven(self):
         path = "/environments/release"
-        for keys, value in ((["can_admins_bypass"], True), (["can_admins_bypass"], None),
-                            (["protection_rules", 1, "prevent_self_review"], True),
+        for keys, value in ((["protection_rules", 1, "prevent_self_review"], True),
                             (["protection_rules", 1, "prevent_self_review"], None),
                             (["protection_rules", 1, "reviewers", 0, "type"], "Team"),
                             (["protection_rules", 1, "reviewers", 0, "reviewer", "login"], "lgraakcg"),
@@ -132,9 +131,17 @@ class HostedPolicyTests(unittest.TestCase):
                             (["protection_rules", 1, "reviewers"], []), (["protection_rules"], [])):
             with self.subTest(keys=keys):
                 self.rejects(path, keys, value)
-        del self.settings[path]["can_admins_bypass"]
-        with self.assertRaises(KeyError):
-            check_policy(self.read)
+
+    def test_release_requires_positive_evidence_of_disabled_administrator_bypass(self):
+        release = self.settings["/environments/release"]
+        release["can_admins_bypass"] = False
+        check_policy(self.read, publication=True)
+        for response in ({}, {"can_admins_bypass": True}, {"can_admins_bypass": None},
+                         {"can_admins_bypass": 0}):
+            release.pop("can_admins_bypass", None)
+            release.update(response)
+            with self.subTest(response=response), self.assertRaisesRegex(ValueError, "release.*can_admins_bypass=false"):
+                check_policy(self.read, publication=True)
 
     def test_all_sensitive_names_must_have_only_the_permitted_scopes(self):
         paths = ("/actions", "/environments/release", "/environments/release-policy",

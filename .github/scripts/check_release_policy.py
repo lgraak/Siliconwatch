@@ -93,7 +93,10 @@ def check_environment(read, name, owner_id):
     require(len(branches) == 1 and branches[0]["name"] == "main" and branches[0]["type"] == "branch",
             f"{name} must allow exactly the main branch")
     if name == "release":
-        require(env["can_admins_bypass"] is False, "Administrator bypass must be disabled on release")
+        require(env.get("can_admins_bypass") is False,
+                "In Settings > Environments > release, disable administrator bypass. Verify that "
+                "GET /environments/release reports can_admins_bypass=false with the policy reader "
+                "before retrying; a missing field cannot establish this control.")
         reviewers = [rule for rule in env["protection_rules"] if rule["type"] == "required_reviewers"]
         require(len(reviewers) == 1 and reviewers[0]["prevent_self_review"] is False,
                 "release must allow the designated owner to approve their own dispatch")
