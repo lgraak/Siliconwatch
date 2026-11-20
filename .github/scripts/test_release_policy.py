@@ -19,6 +19,7 @@ def hosted_settings():
         "/immutable-releases": {"enabled": True},
         "/branches/main": {"name": "main", "protected": True},
         "/branches/main/protection": {
+            "lock_branch": {"enabled": False},
             "enforce_admins": {"enabled": True}, "allow_force_pushes": {"enabled": False},
             "allow_deletions": {"enabled": False},
             "required_pull_request_reviews": {"dismiss_stale_reviews": False, "require_last_push_approval": False,
@@ -89,6 +90,7 @@ class HostedPolicyTests(unittest.TestCase):
         self.rejects("/branches/main", ["protected"], False)
         for keys, value in (
             (["enforce_admins", "enabled"], False), (["allow_force_pushes", "enabled"], True),
+            (["lock_branch", "enabled"], True), (["lock_branch"], {}),
             (["allow_deletions", "enabled"], True),
             (["required_pull_request_reviews", "bypass_pull_request_allowances"], {"teams": [1], "apps": [], "users": []}),
             (["required_status_checks", "strict"], False), (["required_status_checks", "checks"], []),

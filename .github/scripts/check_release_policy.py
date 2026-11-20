@@ -60,6 +60,7 @@ def check_main(read):
     branch = read("/branches/main")
     require(branch["name"] == "main" and branch["protected"] is True, "main is unprotected")
     rules = read("/branches/main/protection")
+    require(rules["lock_branch"]["enabled"] is False, "main must allow checked pull requests to merge; disable Lock branch")
     require(rules["enforce_admins"]["enabled"] is True and
             rules["allow_force_pushes"]["enabled"] is False and rules["allow_deletions"]["enabled"] is False,
             "main must apply protection to administrators and disallow forced updates and deletion")
