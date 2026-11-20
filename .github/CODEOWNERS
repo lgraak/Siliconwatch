@@ -1,11 +1,11 @@
-# Protect the release workflow, policy verifier, qualification evidence and source inputs.
-/.github/                 @lgraak  @lgraakcg
-/packaging/               @lgraak  @lgraakcg
-/scripts/release/         @lgraak  @lgraakcg
-/scripts/source_release/  @lgraak  @lgraakcg
-/docs/legal/              @lgraak  @lgraakcg
-/docs/releases/           @lgraak  @lgraakcg
-/Cargo.toml               @lgraak  @lgraakcg
-/Cargo.lock               @lgraak  @lgraakcg
-/gui/Cargo.toml           @lgraak  @lgraakcg
-/vendor/                  @lgraak  @lgraakcg
+# Route changes to the maintainer of the release workflows and inputs.
+/.github/                 @lgraak
+/packaging/               @lgraak
+/scripts/release/         @lgraak
+/scripts/source_release/  @lgraak
+/docs/legal/              @lgraak
+/docs/releases/           @lgraak
+/Cargo.toml               @lgraak
+/Cargo.lock               @lgraak
+/gui/Cargo.toml           @lgraak
+/vendor/                  @lgraak

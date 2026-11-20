@@ -21,8 +21,8 @@ def hosted_settings():
         "/branches/main/protection": {
             "enforce_admins": {"enabled": True}, "allow_force_pushes": {"enabled": False},
             "allow_deletions": {"enabled": False},
-            "required_pull_request_reviews": {"dismiss_stale_reviews": True,
-                                             "require_code_owner_reviews": True, "required_approving_review_count": 1},
+            "required_pull_request_reviews": {"dismiss_stale_reviews": False, "require_last_push_approval": False,
+                                             "require_code_owner_reviews": False, "required_approving_review_count": 0},
             "required_status_checks": {"strict": True,
                                        "checks": [{"context": name, "app_id": ACTIONS_APP_ID}
                                                   for name in ("Rust 1.85.0", "DCO signoffs")]},
@@ -41,7 +41,7 @@ def hosted_settings():
                 "release-policy": ["RELEASE_POLICY_READER"], "other env": ["OTHER"]}
         responses[path + "/secrets?per_page=100"] = page("secrets", [{"name": name} for name in keys[env]])
     responses["/environments/release"]["protection_rules"].append({
-        "type": "required_reviewers", "prevent_self_review": True, "reviewers": [{"type": "User", "reviewer": owner}]
+        "type": "required_reviewers", "prevent_self_review": False, "reviewers": [{"type": "User", "reviewer": owner}]
     })
     return responses
 
@@ -89,9 +89,7 @@ class HostedPolicyTests(unittest.TestCase):
         self.rejects("/branches/main", ["protected"], False)
         for keys, value in (
             (["enforce_admins", "enabled"], False), (["allow_force_pushes", "enabled"], True),
-            (["allow_deletions", "enabled"], True), (["required_pull_request_reviews", "require_code_owner_reviews"], False),
-            (["required_pull_request_reviews", "dismiss_stale_reviews"], False),
-            (["required_pull_request_reviews", "required_approving_review_count"], 0),
+            (["allow_deletions", "enabled"], True),
             (["required_pull_request_reviews", "bypass_pull_request_allowances"], {"teams": [1], "apps": [], "users": []}),
             (["required_status_checks", "strict"], False), (["required_status_checks", "checks"], []),
             (["required_status_checks", "checks", 0, "app_id"], -1),
@@ -99,6 +97,19 @@ class HostedPolicyTests(unittest.TestCase):
         ):
             with self.subTest(keys=keys):
                 self.rejects("/branches/main/protection", keys, value)
+
+    def test_solo_main_requires_a_pr_without_a_second_approver(self):
+        protection = "/branches/main/protection"
+        review = "required_pull_request_reviews"
+        for value in (None, {}):
+            self.rejects(protection, [review], value)
+        for field, value in (("require_code_owner_reviews", True), ("require_last_push_approval", True),
+                             ("required_approving_review_count", 1), ("required_approving_review_count", False)):
+            with self.subTest(field=field, value=value):
+                self.rejects(protection, [review, field], value)
+        del self.settings[protection][review]
+        with self.assertRaisesRegex(ValueError, "require a pull request"):
+            check_policy(self.read)
 
     def test_branch_or_tag_policy_must_be_unambiguous_on_every_environment(self):
         for name in ("release", "release-candidate", "release-policy"):
@@ -113,9 +124,10 @@ class HostedPolicyTests(unittest.TestCase):
     def test_review_identity_and_admin_bypass_must_be_proven(self):
         path = "/environments/release"
         for keys, value in ((["can_admins_bypass"], True), (["can_admins_bypass"], None),
-                            (["protection_rules", 1, "prevent_self_review"], False),
+                            (["protection_rules", 1, "prevent_self_review"], True),
+                            (["protection_rules", 1, "prevent_self_review"], None),
                             (["protection_rules", 1, "reviewers", 0, "type"], "Team"),
-                            (["protection_rules", 1, "reviewers", 0, "reviewer", "login"], "alternate"),
+                            (["protection_rules", 1, "reviewers", 0, "reviewer", "login"], "lgraakcg"),
                             (["protection_rules", 1, "reviewers", 0, "reviewer", "id"], 7),
                             (["protection_rules", 1, "reviewers"], []), (["protection_rules"], [])):
             with self.subTest(keys=keys):

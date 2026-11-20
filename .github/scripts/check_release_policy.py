@@ -63,10 +63,14 @@ def check_main(read):
     require(rules["enforce_admins"]["enabled"] is True and
             rules["allow_force_pushes"]["enabled"] is False and rules["allow_deletions"]["enabled"] is False,
             "main must apply protection to administrators and disallow forced updates and deletion")
-    review = rules["required_pull_request_reviews"]
-    require(type(review["required_approving_review_count"]) is int and review["required_approving_review_count"] >= 1
-            and review["dismiss_stale_reviews"] is True and review["require_code_owner_reviews"] is True,
-            "main requires a current pull request approval and code-owner review")
+    # An enabled PR rule with zero required approvals still requires a pull request.
+    # A missing or null rule would allow direct updates after the checks pass.
+    review = rules.get("required_pull_request_reviews")
+    require(isinstance(review, dict), "main must require a pull request before merging")
+    count = review["required_approving_review_count"]
+    require(type(count) is int and count == 0 and review["require_code_owner_reviews"] is False
+            and review["require_last_push_approval"] is False,
+            "main must allow the owner to merge a checked PR without a second reviewer")
     # GitHub only supports PR bypass lists for organization-owned repositories.
     if "bypass_pull_request_allowances" in review:
         bypass = review["bypass_pull_request_allowances"]
@@ -91,8 +95,8 @@ def check_environment(read, name, owner_id):
     if name == "release":
         require(env["can_admins_bypass"] is False, "Administrator bypass must be disabled on release")
         reviewers = [rule for rule in env["protection_rules"] if rule["type"] == "required_reviewers"]
-        require(len(reviewers) == 1 and reviewers[0]["prevent_self_review"] is True,
-                "release requires independent reviewer approval")
+        require(len(reviewers) == 1 and reviewers[0]["prevent_self_review"] is False,
+                "release must allow the designated owner to approve their own dispatch")
         allowed = reviewers[0]["reviewers"]
         require(len(allowed) == 1 and allowed[0]["type"] == "User" and
                 allowed[0]["reviewer"]["id"] == owner_id and allowed[0]["reviewer"]["login"] == "lgraak",

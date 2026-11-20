@@ -21,7 +21,7 @@ on:
         required: true
         type: string
       publish:
-        description: Request Chris's approval to publish these exact artifacts
+        description: Request a separate release-environment confirmation to publish these exact artifacts
         type: boolean
         default: false
         required: true

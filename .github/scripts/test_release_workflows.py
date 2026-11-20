@@ -81,12 +81,14 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_dispatch_guard_rejects_unprotected_other_and_retried_workflows(self):
         script = workflow("release-policy.yml")["jobs"]["origin"]["steps"][0]["run"]
         env = {"GITHUB_REPOSITORY_ID": "1459688906", "GITHUB_REPOSITORY": "lgraak/Siliconwatch",
+               "GITHUB_ACTOR": "lgraak", "GITHUB_ACTOR_ID": "9121312",
                "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main",
                "GITHUB_REF_PROTECTED": "true", "GITHUB_RUN_ATTEMPT": "1"}
         for filename in ("release-candidate.yml", "release-publish.yml"):
             env["GITHUB_WORKFLOW_REF"] = f"lgraak/Siliconwatch/.github/workflows/{filename}@refs/heads/main"
             subprocess.run(["bash", "-e", "-c", script], env=env, check=True)
         for name, value in (("GITHUB_REPOSITORY_ID", "0"), ("GITHUB_REPOSITORY", "other/Siliconwatch"),
+                            ("GITHUB_ACTOR", "lgraakcg"), ("GITHUB_ACTOR_ID", "503"),
                             ("GITHUB_REF_PROTECTED", "false"), ("GITHUB_REF", "refs/heads/topic"),
                             ("GITHUB_EVENT_NAME", "push"), ("GITHUB_RUN_ATTEMPT", "2"),
                             ("GITHUB_WORKFLOW_REF", "lgraak/Siliconwatch/.github/workflows/other.yml@refs/heads/main")):
