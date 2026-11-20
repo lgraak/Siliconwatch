@@ -56,7 +56,6 @@ def restricted_profile(context):
             and fs.get("type") == "restricted" and paths == {":minimal", "/mnt/project", "/mnt/source"})
 
 
-
 def read_session(path, instructions):
     """Extract only evidence for this launch from the private native session logs."""
     meta = None
@@ -71,7 +70,11 @@ def read_session(path, instructions):
             event = json.loads(line)
             item = event["payload"]
             if event["type"] == "session_meta":
+                if meta is not None or not isinstance(item.get("id"), str) or not item["id"]:
+                    raise ValueError("ambiguous native session metadata")
                 meta = item
+            elif meta is None:
+                raise ValueError("native session metadata must precede events")
             elif event["type"] == "turn_context":
                 if (item["cwd"] != str(PROJECT) or item["approval_policy"] != "never"
                         or not restricted_profile(item)):

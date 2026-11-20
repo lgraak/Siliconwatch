@@ -140,6 +140,18 @@ class SnapshotTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             session.verify_report(complete, packet, target)
 
+    def test_conflicting_or_repeated_metadata_in_one_log_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "child.jsonl"
+            original = {"id": "child", "parent_thread_id": "parent", "agent_role": "reviewer"}
+            for second in (original, dict(original, id="other"),
+                           dict(original, parent_thread_id="other", agent_role="different")):
+                with self.subTest(second=second):
+                    path.write_text("".join(json.dumps({"type": "session_meta", "payload": meta}) + "\n"
+                                            for meta in (original, second)))
+                    with self.assertRaisesRegex(ValueError, "ambiguous native session metadata"):
+                        session.read_session(path, "fixture instructions")
+
     def test_duplicate_native_session_ids_are_rejected(self):
         result = ({"id": "duplicate"}, [], True, "report", [], [])
         with patch.object(session, "read_session", return_value=result), self.assertRaises(ValueError):
@@ -189,32 +201,24 @@ class SnapshotTests(unittest.TestCase):
                     limitation = probe.stderr.strip() or f"Bubblewrap exited {probe.returncode}"
             except FileNotFoundError as exc:
                 limitation = str(exc)
+            driver = [*host, "--", "/usr/bin/python3", "-I", "-c", DRIVER]
             if limitation:
-                # Run the real failure through in_snapshot. The outer fixture
-                # always isolates the host account, even if mounts partly work.
-                original_run = subprocess.run
-
-                def isolated_failure(args, **kwargs):
-                    result = original_run([*host, "--", *args], **kwargs, capture_output=True, timeout=15)
-                    self.assertEqual(result.stdout, b"")
-                    return result
-
-                with patch.dict(os.environ, {"HOME": str(root / "home"),
-                                "CODEX_HOME": str(ambient)}, clear=True), patch.object(
-                    launch, "mcp_policy", return_value=original_policy.encode()
-                ), patch.object(launch.subprocess, "run", side_effect=isolated_failure):
-                    try:
-                        status = launch.in_snapshot(original_role.encode(), OBSERVER, "/usr/bin/false", "0" * 40,
-                                                    source=root / "checkout", packet=original_packet.encode())
-                    except FileNotFoundError:
-                        self.assertFalse(Path("/usr/bin/bwrap").exists())
-                    else:
-                        self.assertNotEqual(status, 0)
+                try:
+                    failed = subprocess.run(driver, env=env, input="", capture_output=True,
+                                            text=True, timeout=15)
+                except FileNotFoundError as exc:
+                    self.assertEqual(exc.filename, "/usr/bin/bwrap")
+                    self.assertFalse(Path(exc.filename).exists())
+                else:
+                    self.assertNotEqual(failed.returncode, 0)
+                    self.assertEqual(failed.stdout, "")
+                    self.assertIn(limitation, failed.stderr,
+                                  "fixture launcher failed for a different reason than the prerequisite probe")
                 if required:
                     self.fail(limitation)
                 self.skipTest("verified launch failure; Bubblewrap user namespace/overlay unavailable: " + limitation)
 
-            with subprocess.Popen([*host, "--", "/usr/bin/python3", "-I", "-c", DRIVER],
+            with subprocess.Popen(driver,
                                   env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True) as process:
                 def expect(stage):
